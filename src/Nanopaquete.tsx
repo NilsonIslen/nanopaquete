@@ -512,6 +512,41 @@ export function Nanopaquete() {
                       Tomar oferta
                     </button>
                   )}
+                  {releaseFeeIntent?.offerId === offer.id && (
+                    <div className="private-box release-fee-box inline-release-fee-box">
+                      <p className="eyebrow">Liberar fondos</p>
+                      <h3>Paga {releaseFeeIntent.amountXno} XNO desde la wallet vendedora a la custodia.</h3>
+                      <p>Cuando la app detecte esa transferencia, la oferta pasara a estado liberando y el custodio podra enviar los fondos a la wallet registrada por el comprador.</p>
+                      <div className="payment-actions">
+                        <button className="primary-button" type="button" onClick={() => openNanoPayment(releaseFeeIntent.paymentUri)}>
+                          <Wallet size={18} />
+                          Pagar comision
+                        </button>
+                        <button className="ghost-button" type="button" onClick={() => void copyValue(releaseFeeIntent.receiverAddress)}>
+                          <Copy size={16} />
+                          Copiar custodia
+                        </button>
+                      </div>
+                      <div className="payment-qr" aria-label="QR de comision de liberacion">
+                        <QRCodeSVG value={releaseFeeIntent.paymentUri} size={176} marginSize={2} />
+                      </div>
+                      <dl>
+                        <dt>Desde wallet</dt>
+                        <dd>{releaseFeeIntent.senderWallet}</dd>
+                        <dt>Hacia custodia</dt>
+                        <dd>{releaseFeeIntent.receiverAddress}</dd>
+                        <dt>Monto</dt>
+                        <dd>{releaseFeeIntent.amountXno} XNO</dd>
+                      </dl>
+                      <button className="primary-button" type="button" onClick={handleVerifyReleaseFee} disabled={loading === 'release-verify'}>
+                        Verificar comision
+                      </button>
+                      <button className="ghost-button danger-button" type="button" onClick={() => setReleaseFeeIntent(null)}>
+                        <X size={16} />
+                        Cerrar
+                      </button>
+                    </div>
+                  )}
                   {isSelected && (
                     <form className="take-form inline-take-form" onSubmit={handleTakeOffer}>
                       <div>
@@ -544,41 +579,6 @@ export function Nanopaquete() {
             {!offers.length && <p className="empty-state">No hay ofertas activas en este momento.</p>}
           </div>
 
-          {releaseFeeIntent && (
-            <div className="private-box release-fee-box">
-              <p className="eyebrow">Liberar fondos</p>
-              <h3>Paga {releaseFeeIntent.amountXno} XNO desde la wallet vendedora a la custodia.</h3>
-              <p>Cuando la app detecte esa transferencia, la oferta pasara a estado liberando y el custodio podra enviar los fondos a la wallet registrada por el comprador.</p>
-              <div className="payment-actions">
-                <button className="primary-button" type="button" onClick={() => openNanoPayment(releaseFeeIntent.paymentUri)}>
-                  <Wallet size={18} />
-                  Pagar comision
-                </button>
-                <button className="ghost-button" type="button" onClick={() => void copyValue(releaseFeeIntent.receiverAddress)}>
-                  <Copy size={16} />
-                  Copiar custodia
-                </button>
-              </div>
-              <div className="payment-qr" aria-label="QR de comision de liberacion">
-                <QRCodeSVG value={releaseFeeIntent.paymentUri} size={176} marginSize={2} />
-              </div>
-              <dl>
-                <dt>Desde wallet</dt>
-                <dd>{releaseFeeIntent.senderWallet}</dd>
-                <dt>Hacia custodia</dt>
-                <dd>{releaseFeeIntent.receiverAddress}</dd>
-                <dt>Monto</dt>
-                <dd>{releaseFeeIntent.amountXno} XNO</dd>
-              </dl>
-              <button className="primary-button" type="button" onClick={handleVerifyReleaseFee} disabled={loading === 'release-verify'}>
-                Verificar comision
-              </button>
-              <button className="ghost-button danger-button" type="button" onClick={() => setReleaseFeeIntent(null)}>
-                <X size={16} />
-                Cerrar
-              </button>
-            </div>
-          )}
 
           {takenOffer && (
             <div className="private-box buyer-result">
