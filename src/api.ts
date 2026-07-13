@@ -71,6 +71,7 @@ export type PublicOffer = {
 export type SellerPaymentIntent = {
   intentId: string
   receiverAddress: string
+  amountXno: string
   paymentUri: string
   expiresAt: string
   custodianId: string
@@ -192,10 +193,10 @@ export const getBuyerNegotiation = (clientSessionId: string) =>
     `/buyer-negotiation?clientSessionId=${encodeURIComponent(clientSessionId)}`,
   )
 
-export const startSellerPayment = (clientSessionId: string, custodianId: string) =>
+export const startSellerPayment = (clientSessionId: string, custodianId: string, amountXno: string) =>
   requestJson<SellerPaymentIntent>('/seller-payments', {
     method: 'POST',
-    body: JSON.stringify({ clientSessionId, custodianId }),
+    body: JSON.stringify({ clientSessionId, custodianId, amountXno }),
   })
 
 export const verifySellerPayment = (intentId: string, clientSessionId: string) =>

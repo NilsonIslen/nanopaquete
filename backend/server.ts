@@ -832,6 +832,17 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
   if (request.method === 'POST' && url.pathname === '/api/seller-payments') {
     const body = await readJsonBody(request)
     const clientSessionId = normalizeClientSessionId(body.clientSessionId)
+    const amountXno = normalizeText(body.amountXno).replace(',', '.')
+
+    try {
+      if (BigInt(nanoToRaw(amountXno)) <= 0n) {
+        throw new Error('Monto invalido')
+      }
+    } catch {
+      sendJson(response, 400, { error: 'Ingresa la cantidad de XNO que vas a vender.' })
+      return
+    }
+
     const store = await readStore()
     const custodian = getCustodianById(store, normalizeText(body.custodianId))
     const now = Date.now()
@@ -847,6 +858,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       clientSessionId: clientSessionId || undefined,
       createdAt: new Date(now).toISOString(),
       expiresAt: new Date(now + sellerPaymentTtlMs).toISOString(),
+      amountXno,
     }
     store.sellerPaymentIntents.push(intent)
     await writeStore(store)
@@ -854,7 +866,8 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     sendJson(response, 201, {
       intentId: intent.id,
       receiverAddress: intent.receiverAddress,
-      paymentUri: createNanoPaymentUri(intent.receiverAddress),
+      amountXno: intent.amountXno,
+      paymentUri: createNanoPaymentUri(intent.receiverAddress, intent.amountXno),
       expiresAt: intent.expiresAt,
       custodianId: custodian.id,
       custodianName: custodian.name,
@@ -900,11 +913,18 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     }
 
     try {
-      const payment = await findAnyIncomingPayment({
-        receiverWallet: intent.receiverAddress,
-        createdAfter: intent.createdAt,
-        excludedHashes: store.usedPayments.map((item) => item.hash),
-      })
+      const payment = intent.amountXno
+        ? await findIncomingPaymentByAmount({
+            receiverWallet: intent.receiverAddress,
+            amountNano: intent.amountXno,
+            createdAfter: intent.createdAt,
+            excludedHashes: store.usedPayments.map((item) => item.hash),
+          })
+        : await findAnyIncomingPayment({
+            receiverWallet: intent.receiverAddress,
+            createdAfter: intent.createdAt,
+            excludedHashes: store.usedPayments.map((item) => item.hash),
+          })
 
       if (store.usedPayments.some((item) => item.hash === payment.hash)) {
         sendJson(response, 409, { error: 'Este deposito ya fue utilizado.' })

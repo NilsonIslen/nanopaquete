@@ -132,10 +132,10 @@ const contactCountries = [
   { country: 'Republica Dominicana', dialCode: '+1' },
   { country: 'Uruguay', dialCode: '+598' },
   { country: 'Venezuela', dialCode: '+58' },
-  { country: 'Otro', dialCode: '' },
 ]
 
 const initialSellerForm = {
+  amountXno: '',
   currency: 'COP' as Currency,
   price: '',
   sellerCountry: 'Colombia',
@@ -514,7 +514,7 @@ export function Nanopaquete() {
     setLoading('start-payment')
 
     try {
-      const intent = await startSellerPayment(clientSessionId, selectedCustodianId)
+      const intent = await startSellerPayment(clientSessionId, selectedCustodianId, sellerForm.amountXno)
       window.localStorage.setItem(sellerOfferDraftStorageKey, JSON.stringify(sellerForm))
       setSellerPayment(intent)
       setActiveView('create-offer')
@@ -1052,6 +1052,16 @@ export function Nanopaquete() {
                 </select>
               </label>
               <label>
+                Cantidad de Nano a vender
+                <input
+                  inputMode="decimal"
+                  placeholder="Ej. 10"
+                  value={sellerForm.amountXno}
+                  onChange={(event) => updateSellerForm('amountXno', event.target.value)}
+                  required
+                />
+              </label>
+              <label>
                 Activo a recibir
                 <select
                   value={sellerForm.currency}
@@ -1063,7 +1073,7 @@ export function Nanopaquete() {
                 </select>
               </label>
               <label>
-                Precio esperado
+                Precio total del paquete
                 <input
                   placeholder="Ej. 180000"
                   value={sellerForm.price}
@@ -1085,15 +1095,6 @@ export function Nanopaquete() {
                     <option key={item.country} value={item.country}>{item.country}</option>
                   ))}
                 </select>
-              </label>
-              <label>
-                Extension internacional
-                <input
-                  placeholder="+57"
-                  value={sellerForm.sellerDialCode}
-                  onChange={(event) => updateSellerForm('sellerDialCode', event.target.value)}
-                  required
-                />
               </label>
               <label>
                 Contacto
@@ -1132,6 +1133,8 @@ export function Nanopaquete() {
                 <dd>{sellerPayment.custodianName}</dd>
                 <dt>Wallet custodia</dt>
                 <dd>{sellerPayment.receiverAddress}</dd>
+                <dt>Monto a depositar</dt>
+                <dd>{sellerPayment.amountXno} XNO</dd>
                 <dt>Vence</dt>
                 <dd>{shortDate(sellerPayment.expiresAt)}</dd>
                 <dt>Contacto custodio</dt>
@@ -1384,15 +1387,6 @@ export function Nanopaquete() {
                             <option key={item.country} value={item.country}>{item.country}</option>
                           ))}
                         </select>
-                      </label>
-                      <label>
-                        Extension internacional
-                        <input
-                          placeholder="+57"
-                          value={buyerForm.dialCode}
-                          onChange={(event) => updateBuyerForm('dialCode', event.target.value)}
-                          required
-                        />
                       </label>
                       <label>
                         Contacto
