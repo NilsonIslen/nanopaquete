@@ -649,15 +649,35 @@ export function Nanopaquete() {
       {activeView === 'guide' && (
         <section className="single-page-panel">
           <div className="panel guide-panel">
-            <h2>Guia</h2>
+            <h2>Guía</h2>
             <h3>Condiciones generales</h3>
-            <p>Nanopaquete organiza negociaciones P2P con custodia Nano. El vendedor deposita los XNO antes de publicar y el comprador registra la wallet donde desea recibirlos.</p>
+            <p>Nanopaquete organiza negociaciones P2P con custodia Nano. La plataforma no persigue el precio del mercado: cada vendedor define cuánto espera recibir por su paquete de XNO y cada comprador decide qué oferta tomar. Esa competencia interna ayuda a evitar precios inflados o devaluados, siempre bajo el criterio de quienes poseen y demandan Nano.</p>
             <h3>Vendedor</h3>
-            <p>Publica solo montos que ya transferiste a la cuenta de custodia seleccionada. Confirma el pago fiat/externo solo cuando realmente lo hayas recibido.</p>
+            <p>El vendedor publica una oferta de Nano. Para hacerlo, primero debe transferir al custodio seleccionado el monto exacto de XNO que quiere vender.</p>
+            <p>Cuando Nanopaquete detecta la transferencia, habilita un formulario para indicar qué activo espera recibir a cambio y el precio de su paquete. Después de publicar, solo puede editar el precio.</p>
+            <p>Cuando un comprador toma una oferta, esta queda bloqueada junto con sus fondos. El vendedor recibe la información de contacto del comprador y solo puede liberar esos XNO hacia la wallet registrada por ese comprador.</p>
+            <p>Cuando recibe el pago acordado, el vendedor lo confirma desde la plataforma mediante una transferencia de 0.1 XNO al custodio. Esa confirmación habilita al custodio para liberar los fondos exclusivamente al comprador.</p>
             <h3>Comprador</h3>
-            <p>Antes de pagar, verifica que la oferta siga en negociacion y que la wallet registrada sea correcta. Si cancelas antes de que el vendedor confirme, la oferta vuelve a estar disponible.</p>
+            <p>El comprador es cualquier persona que toma una de las ofertas publicadas. Al hacerlo, ingresa la dirección Nano donde quiere recibir los fondos y su número de contacto.</p>
+            <p>Después de enviar esa información, recibe el contacto del vendedor para comunicarse y acordar cómo realizar el pago. Durante la negociación, los XNO quedan bajo custodia para que pueda pagar con mayor tranquilidad.</p>
+            <p>Es importante guardar el comprobante de pago en caso de conflicto y verificar muy bien la dirección Nano y el contacto ingresados. Si el comprador registra datos incorrectos y el custodio no puede comunicarse con él, el custodio dará prioridad a la parte con la que sí sea posible establecer comunicación.</p>
             <h3>Custodio</h3>
-            <p>Solo custodios autorizados pueden liberar fondos. La liberacion se hace unicamente hacia la wallet registrada por el comprador y solo cuando la oferta esta en estado liberando.</p>
+            <p>El custodio es una persona de confianza directa de la plataforma y forma parte de un grupo de custodios que sirven como intermediarios en las negociaciones.</p>
+            <p>En condiciones normales, el proceso es automático: cuando el vendedor confirma que recibió el pago, el custodio solo libera los fondos al comprador desde la opción habilitada, sin validaciones adicionales.</p>
+            <p>El custodio interviene cuando hay conflicto. En ese caso solicita comprobantes, revisa la situación y decide si libera los fondos al comprador o libera la oferta según corresponda.</p>
+            <p>Cada custodio recibe 0.1 XNO por intermediación, pagados por el vendedor al confirmar que recibió el pago de su contraparte.</p>
+            <p>Si un usuario pierde dinero por equivocación o mala fe de un custodio, los demás custodios deben reponer la pérdida del usuario y determinar si el custodio responsable continúa o es expulsado.</p>
+            <h3>Líder</h3>
+            <p>El líder intermedia entre custodios y desarrolladores para mantener la plataforma funcionando y en constante actualización. También incluye o expulsa custodios a nivel técnico según las solicitudes del grupo.</p>
+            <p>El líder también es custodio y tiene las mismas posibilidades de recibir ingresos que los demás custodios. Su trabajo adicional como líder es un aporte voluntario y no recibe pago extra por esa función, conservando la naturaleza de Nano: personas que aportan a la red por principios propios y convicción sobre el proyecto.</p>
+            <p>Contacto del líder: <strong>+573008188484</strong>.</p>
+            <h3>Posibles disputas</h3>
+            <div className="guide-disputes">
+              <p><strong>El comprador no responde:</strong> el vendedor debe intentar comunicarse con el comprador para que pague o libere la oferta. Si pasan 24 horas sin respuesta, el vendedor puede solicitar al custodio que libere la oferta para que vuelva a estar visible.</p>
+              <p><strong>El comprador responde, pero no paga después de 24 horas:</strong> se le solicita que libere la oferta. Si no atiende la solicitud, el vendedor informa al custodio. Tras revisar el caso, el custodio libera la oferta y reporta el contacto y la dirección Nano al líder para agregarlos a una lista negativa que impida negociar nuevamente con esos datos.</p>
+              <p><strong>El comprador paga, pero el vendedor no confirma:</strong> el comprador debe reportar el caso al custodio y enviar el comprobante de pago. El custodio revisa el soporte, se comunica con el vendedor y solicita la confirmación. Si el vendedor no atiende y el custodio identifica que el pago sí fue realizado, libera los fondos al comprador sin recibir comisión y reporta el contacto y la dirección Nano del vendedor a la lista negativa. Si el vendedor tiene más ofertas publicadas, se cierran y se le devuelven los XNO descontando el valor de la comisión.</p>
+              <p><strong>El custodio toma una decisión equivocada y una parte pierde dinero:</strong> el usuario afectado puede comunicarse con el líder. El líder revisa el caso con el custodio y, si confirma la equivocación, solicita que reponga el saldo del usuario. Si el custodio no responde, el caso se presenta al grupo de custodios, quienes deben reunir el saldo para reponer al usuario. El custodio responsable queda expulsado.</p>
+            </div>
           </div>
         </section>
       )}

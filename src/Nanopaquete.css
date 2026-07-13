@@ -713,6 +713,28 @@ dd {
 
 .guide-panel {
   gap: 14px;
+  max-width: 980px;
+}
+
+.guide-panel h3 {
+  margin-top: 8px;
+}
+
+.guide-disputes {
+  display: grid;
+  gap: 12px;
+  border-left: 4px solid #1f5f8f;
+  padding-left: 16px;
+}
+
+.guide-disputes p {
+  padding-bottom: 12px;
+  border-bottom: 1px solid #d9e2ec;
+}
+
+.guide-disputes p:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
 }
 
 .standalone-link {
