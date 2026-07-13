@@ -112,6 +112,34 @@ const openNanoPayment = (paymentUri: string) => {
   window.location.href = paymentUri
 }
 
+const getAmountValue = (value: string) => {
+  const parsed = Number(value.replace(',', '.'))
+  return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER
+}
+
+const getCustodianStatusRank = (status: PublicOffer['status']) =>
+  ({ RELEASING: 0, NEGOTIATION: 1, ACTIVE: 2 } as Partial<Record<PublicOffer['status'], number>>)[status] ?? 9
+
+const getNormalOfferRank = (offer: PublicOffer) => {
+  if (offer.isOwnOffer && offer.status === 'NEGOTIATION') return 0
+  if (offer.isOwnOffer) return 1
+  return 2
+}
+
+const sortOffers = (offers: PublicOffer[], isCustodian: boolean) =>
+  [...offers].sort((left, right) => {
+    const rankDifference = isCustodian
+      ? getCustodianStatusRank(left.status) - getCustodianStatusRank(right.status)
+      : getNormalOfferRank(left) - getNormalOfferRank(right)
+
+    if (rankDifference !== 0) return rankDifference
+
+    const amountDifference = getAmountValue(left.amountXno) - getAmountValue(right.amountXno)
+    if (amountDifference !== 0) return amountDifference
+
+    return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
+  })
+
 export function Nanopaquete() {
   const [sellerForm, setSellerForm] = useState(initialSellerForm)
   const [sellerPayment, setSellerPayment] = useState<SellerPaymentIntent | null>(getStoredSellerPayment)
@@ -129,7 +157,7 @@ export function Nanopaquete() {
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [clientSessionId] = useState(getClientSessionId)
-  const visibleOffers = takenOffer ? [takenOffer.offer] : offers
+  const visibleOffers = takenOffer ? [takenOffer.offer] : sortOffers(offers, Boolean(custodianSession))
 
   const loadOffers = async () => {
     setError(null)

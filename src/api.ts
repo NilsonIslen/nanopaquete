@@ -19,6 +19,7 @@ export type PublicOffer = {
   price: string
   status: OfferStatus
   createdAt: string
+  isOwnOffer?: boolean
   canConfirmPayment?: boolean
   buyerCountry?: string
   buyerDialCode?: string

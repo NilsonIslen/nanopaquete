@@ -303,6 +303,7 @@ const publicOffer = (offer: OfferRecord, context: { clientSessionId?: string; cu
     price: offer.price,
     status: offer.status,
     createdAt: offer.createdAt,
+    isOwnOffer: isSeller,
     canConfirmPayment: isSeller && offer.status === 'NEGOTIATION',
     ...(isSeller && offer.status === 'NEGOTIATION' && offer.buyerContact
       ? {
