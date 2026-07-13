@@ -370,6 +370,20 @@ export function Nanopaquete() {
     }
   }
 
+  const handleCloseCustodianSession = async () => {
+    setCustodianSession(null)
+    setCustodianAuthIntent(null)
+    window.localStorage.removeItem(custodianSessionStorageKey)
+    setError(null)
+
+    try {
+      const response = await getOffers(clientSessionId)
+      setOffers(response.offers)
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'No se pudieron cargar las ofertas.')
+    }
+  }
+
   const handleCancelTakenOffer = async () => {
     if (!takenOffer) return
     setError(null)
@@ -405,7 +419,15 @@ export function Nanopaquete() {
             <ShieldCheck size={18} />
             Acceso custodio autorizado
           </button>
-          {custodianSession && <span>Custodio autenticado: {custodianSession.custodianName}</span>}
+          {custodianSession && (
+            <span className="custodian-session-pill">
+              Custodio autenticado: {custodianSession.custodianName}
+              <button type="button" onClick={() => void handleCloseCustodianSession()}>
+                <X size={16} />
+                Cerrar sesion
+              </button>
+            </span>
+          )}
         </div>
         {custodianAuthIntent && (
           <div className="private-box custodian-auth-box">

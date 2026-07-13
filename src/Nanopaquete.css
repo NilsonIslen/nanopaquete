@@ -549,3 +549,16 @@ dd {
   border-color: #b9cfe9;
   background: #f1f6fc;
 }
+
+.custodian-session-pill {
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.custodian-session-pill button {
+  min-height: 34px;
+  padding: 0 10px;
+  background: #dfeade;
+  color: #1d562f;
+  border: 1px solid #bee4c6;
+}
