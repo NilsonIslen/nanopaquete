@@ -499,34 +499,15 @@ export function Nanopaquete() {
                   {offer.status === 'RELEASING' && (
                     <div className="private-box custodian-release-box">
                       <span className="offer-status-pill">Liberando</span>
-                      <h3>Transferir al comprador</h3>
-                      <p>Esta oferta ya fue confirmada por el vendedor. El custodio debe enviar {offer.amountXno} XNO a la wallet registrada por el comprador.</p>
-                      {offer.buyerNanoAddress && (
-                        <dl>
-                          <dt>Wallet comprador</dt>
-                          <dd>{offer.buyerNanoAddress}</dd>
-                          <dt>Monto</dt>
-                          <dd>{offer.amountXno} XNO</dd>
-                        </dl>
-                      )}
+                      <h3>Transferencia del custodio</h3>
+                      <p>Esta oferta ya fue confirmada por el vendedor. El custodio puede usar este enlace para liberar los fondos al comprador.</p>
                       {offer.custodianReleaseUri && (
-                        <>
-                          <div className="payment-actions">
-                            <button className="primary-button" type="button" onClick={() => openNanoPayment(offer.custodianReleaseUri || '')}>
-                              <Wallet size={18} />
-                              Transferir al comprador
-                            </button>
-                            {offer.buyerNanoAddress && (
-                              <button className="ghost-button" type="button" onClick={() => void copyValue(offer.buyerNanoAddress || '')}>
-                                <Copy size={16} />
-                                Copiar wallet
-                              </button>
-                            )}
-                          </div>
-                          <div className="payment-qr" aria-label="QR para transferir al comprador">
-                            <QRCodeSVG value={offer.custodianReleaseUri} size={176} marginSize={2} />
-                          </div>
-                        </>
+                        <div className="payment-actions">
+                          <button className="primary-button" type="button" onClick={() => openNanoPayment(offer.custodianReleaseUri || '')}>
+                            <Wallet size={18} />
+                            Transferir al comprador
+                          </button>
+                        </div>
                       )}
                     </div>
                   )}

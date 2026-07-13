@@ -13,7 +13,6 @@ export type PublicOffer = {
   price: string
   status: OfferStatus
   createdAt: string
-  buyerNanoAddress?: string
   custodianReleaseUri?: string
 }
 
