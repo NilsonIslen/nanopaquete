@@ -585,6 +585,46 @@ dd {
   border: 1px solid #b8d8ef;
 }
 
+.custodian-admin-box {
+  align-items: stretch;
+}
+
+.custodian-list {
+  display: grid;
+  gap: 10px;
+}
+
+.custodian-list-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid #d9e2ec;
+  border-radius: 8px;
+  padding: 12px;
+  background: #ffffff;
+}
+
+.custodian-list-item div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.custodian-list-item span,
+.custodian-list-item small {
+  color: #506172;
+}
+
+.custodian-list-item small {
+  overflow-wrap: anywhere;
+}
+
+.custodian-admin-form {
+  border-top: 1px solid #d9e2ec;
+  padding-top: 14px;
+}
+
 .brand-lockup {
   display: flex;
   align-items: center;

@@ -12,6 +12,10 @@ export type CustodianOption = {
   contact: string
 }
 
+export type ManagedCustodian = CustodianOption & {
+  wallet: string
+}
+
 export type PublicOffer = {
   id: string
   amountXno: string
@@ -105,6 +109,7 @@ export type CustodianSession = {
   expiresAt: string
   custodianId: string
   custodianName: string
+  isLeader?: boolean
 }
 
 export type ReleaseFeeIntent = {
@@ -221,6 +226,29 @@ export const verifyCustodianAuth = (intentId: string) =>
     method: 'POST',
     body: JSON.stringify({}),
   })
+
+export const getManagedCustodians = (custodianSessionId: string) =>
+  requestJson<{ custodians: ManagedCustodian[]; leaderCustodianId: string; canManage: boolean }>(
+    `/custodian-admin/custodians?custodianSessionId=${encodeURIComponent(custodianSessionId)}`,
+  )
+
+export const addManagedCustodian = (payload: { custodianSessionId: string; name: string; wallet: string; contact: string }) =>
+  requestJson<{ custodian: ManagedCustodian; custodians: ManagedCustodian[]; leaderCustodianId: string }>(
+    '/custodian-admin/custodians',
+    {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    },
+  )
+
+export const deleteManagedCustodian = (custodianId: string, custodianSessionId: string) =>
+  requestJson<{ custodians: ManagedCustodian[]; leaderCustodianId: string }>(
+    `/custodian-admin/custodians/${encodeURIComponent(custodianId)}`,
+    {
+      method: 'DELETE',
+      body: JSON.stringify({ custodianSessionId }),
+    },
+  )
 
 export const verifyCustodianRelease = (offerId: string, custodianSessionId: string) =>
   requestJson<{ offer: PublicOffer; paymentHash?: string }>(`/offers/${encodeURIComponent(offerId)}/verify-custodian-release`, {

@@ -2,7 +2,10 @@ import { useEffect, useState } from 'react'
 import { ArrowLeft, CheckCircle2, Copy, Download, Menu, ShieldCheck, Wallet, X } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import {
+  addManagedCustodian,
   cancelTakenOffer,
+  deleteManagedCustodian,
+  getManagedCustodians,
   getBuyerNegotiation,
   getCustodians,
   getOffers,
@@ -27,6 +30,7 @@ import {
   type ReleaseFeeIntent,
   type SellerPaymentIntent,
   type TakenOffer,
+  type ManagedCustodian,
 } from './api'
 import './Nanopaquete.css'
 
@@ -60,6 +64,12 @@ const initialBuyerForm = {
   nanoAddress: '',
   country: 'Colombia',
   dialCode: '+57',
+  contact: '',
+}
+
+const initialCustodianForm = {
+  name: '',
+  wallet: '',
   contact: '',
 }
 
@@ -166,6 +176,9 @@ export function Nanopaquete() {
   const [publishedOffer, setPublishedOffer] = useState<PublishedOffer | null>(null)
   const [offers, setOffers] = useState<PublicOffer[]>([])
   const [custodians, setCustodians] = useState<CustodianOption[]>([])
+  const [managedCustodians, setManagedCustodians] = useState<ManagedCustodian[]>([])
+  const [leaderCustodianId, setLeaderCustodianId] = useState('')
+  const [custodianForm, setCustodianForm] = useState(initialCustodianForm)
   const [selectedCustodianId, setSelectedCustodianId] = useState('')
   const [selectedOffer, setSelectedOffer] = useState<PublicOffer | null>(null)
   const [buyerForm, setBuyerForm] = useState(initialBuyerForm)
@@ -182,6 +195,9 @@ export function Nanopaquete() {
   const [clientSessionId] = useState(getClientSessionId)
   const visibleOffers = takenOffer ? [takenOffer.offer] : sortOffers(offers, Boolean(custodianSession))
   const takenOfferId = takenOffer?.offer.id
+  const canManageCustodians = Boolean(
+    custodianSession?.isLeader || (leaderCustodianId && custodianSession?.custodianId === leaderCustodianId),
+  )
 
   const loadOffers = async () => {
     setError(null)
@@ -195,6 +211,21 @@ export function Nanopaquete() {
     } finally {
       setLoading(null)
     }
+  }
+
+  const loadCustodians = async () => {
+    const response = await getCustodians()
+    setCustodians(response.custodians)
+    setSelectedCustodianId((current) =>
+      response.custodians.some((custodian) => custodian.id === current) ? current : response.custodians[0]?.id || '',
+    )
+  }
+
+  const loadManagedCustodians = async (sessionId = custodianSession?.sessionId) => {
+    if (!sessionId) return
+    const response = await getManagedCustodians(sessionId)
+    setManagedCustodians(response.custodians)
+    setLeaderCustodianId(response.leaderCustodianId)
   }
 
   useEffect(() => {
@@ -276,12 +307,69 @@ export function Nanopaquete() {
     window.localStorage.removeItem(custodianSessionStorageKey)
   }, [custodianSession])
 
+  useEffect(() => {
+    if (!custodianSession) {
+      setManagedCustodians([])
+      setLeaderCustodianId('')
+      return
+    }
+
+    loadManagedCustodians(custodianSession.sessionId).catch((requestError) => {
+      setError(requestError instanceof Error ? requestError.message : 'No se pudo cargar la lista de custodios.')
+    })
+  }, [custodianSession?.sessionId])
+
   const updateSellerForm = (field: keyof typeof sellerForm, value: string) => {
     setSellerForm((current) => ({ ...current, [field]: value }))
   }
 
   const updateBuyerForm = (field: keyof typeof buyerForm, value: string) => {
     setBuyerForm((current) => ({ ...current, [field]: value }))
+  }
+
+  const updateCustodianForm = (field: keyof typeof custodianForm, value: string) => {
+    setCustodianForm((current) => ({ ...current, [field]: value }))
+  }
+
+  const handleAddCustodian = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!custodianSession || !canManageCustodians) return
+    setError(null)
+    setLoading('custodian-add')
+
+    try {
+      const response = await addManagedCustodian({
+        custodianSessionId: custodianSession.sessionId,
+        name: custodianForm.name,
+        wallet: custodianForm.wallet,
+        contact: custodianForm.contact,
+      })
+      setManagedCustodians(response.custodians)
+      setLeaderCustodianId(response.leaderCustodianId)
+      setCustodianForm(initialCustodianForm)
+      await loadCustodians()
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'No se pudo agregar el custodio.')
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  const handleDeleteCustodian = async (custodianId: string) => {
+    if (!custodianSession || !canManageCustodians) return
+    setError(null)
+    setLoading(`custodian-delete:${custodianId}`)
+
+    try {
+      const response = await deleteManagedCustodian(custodianId, custodianSession.sessionId)
+      setManagedCustodians(response.custodians)
+      setLeaderCustodianId(response.leaderCustodianId)
+      await loadCustodians()
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'No se pudo eliminar el custodio.')
+    } finally {
+      setLoading(null)
+    }
   }
 
   const handleStartSellerPayment = async () => {
@@ -509,6 +597,9 @@ export function Nanopaquete() {
   const handleCloseCustodianSession = async () => {
     setCustodianSession(null)
     setCustodianAuthIntent(null)
+    setManagedCustodians([])
+    setLeaderCustodianId('')
+    setCustodianForm(initialCustodianForm)
     window.localStorage.removeItem(custodianSessionStorageKey)
     setError(null)
 
@@ -582,13 +673,68 @@ export function Nanopaquete() {
             <h2>Autenticacion custodio</h2>
             <p>Acceso solo para cuentas autorizadas.</p>
             {custodianSession ? (
-              <div className="private-box">
-                <p>Custodio autenticado: <strong>{custodianSession.custodianName}</strong></p>
-                <button className="ghost-button danger-button" type="button" onClick={() => void handleCloseCustodianSession()}>
-                  <X size={16} />
-                  Cerrar sesion
-                </button>
-              </div>
+              <>
+                <div className="private-box">
+                  <p>Custodio autenticado: <strong>{custodianSession.custodianName}</strong></p>
+                  <button className="ghost-button danger-button" type="button" onClick={() => void handleCloseCustodianSession()}>
+                    <X size={16} />
+                    Cerrar sesion
+                  </button>
+                </div>
+                {!!managedCustodians.length && (
+                  <div className="private-box custodian-admin-box">
+                    <div className="panel-heading">
+                      <h3>Custodios</h3>
+                      <p>Lista privada para custodios autenticados. Solo el custodio lider puede agregar o eliminar custodios.</p>
+                    </div>
+                    <div className="custodian-list">
+                      {managedCustodians.map((custodian) => (
+                        <article className="custodian-list-item" key={custodian.id}>
+                          <div>
+                            <strong>{custodian.name}</strong>
+                            <span>{custodian.contact}</span>
+                            <small>{custodian.wallet}</small>
+                          </div>
+                          {custodian.id === leaderCustodianId ? (
+                            <span className="offer-status-pill">Lider</span>
+                          ) : !canManageCustodians ? (
+                            <span className="offer-status-pill">Custodio</span>
+                          ) : (
+                            <button
+                              className="ghost-button danger-button"
+                              type="button"
+                              onClick={() => void handleDeleteCustodian(custodian.id)}
+                              disabled={loading === `custodian-delete:${custodian.id}`}
+                            >
+                              <X size={16} />
+                              Eliminar
+                            </button>
+                          )}
+                        </article>
+                      ))}
+                    </div>
+                    {canManageCustodians && (
+                      <form className="stack-form custodian-admin-form" onSubmit={handleAddCustodian}>
+                        <label>
+                          Nombre
+                          <input value={custodianForm.name} onChange={(event) => updateCustodianForm('name', event.target.value)} required />
+                        </label>
+                        <label>
+                          Wallet Nano
+                          <input value={custodianForm.wallet} onChange={(event) => updateCustodianForm('wallet', event.target.value)} required />
+                        </label>
+                        <label>
+                          Contacto
+                          <input value={custodianForm.contact} onChange={(event) => updateCustodianForm('contact', event.target.value)} required />
+                        </label>
+                        <button className="primary-button" type="submit" disabled={loading === 'custodian-add'}>
+                          Agregar custodio
+                        </button>
+                      </form>
+                    )}
+                  </div>
+                )}
+              </>
             ) : (
               <button className="primary-button" type="button" onClick={handleStartCustodianAuth} disabled={loading === 'custodian-auth-start' || !selectedCustodianId}>
                 <ShieldCheck size={18} />

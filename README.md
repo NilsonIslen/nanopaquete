@@ -33,7 +33,7 @@ npm run lint
 - `NANOPAQUETE_API_PORT`: puerto API, por defecto `8789`.
 - Custodio por defecto: `Nilson Islen Castrillon`.
 - `NANOPAQUETE_ESCROW_WALLET`: wallet Nano del primer custodio. Por defecto usa `nano_1j7csyciamkzktswyxey5yt6f1rg1zbw3rtioe7xdze4fekkbo7zxri3ijxd`.
-- `NANOPAQUETE_CUSTODIAN_CONTACT`: contacto privado del primer custodio. Por defecto usa `+57 3008188284`.
+- `NANOPAQUETE_CUSTODIAN_CONTACT`: contacto privado del primer custodio. Por defecto usa `+573008188284`.
 - `NANOPAQUETE_CUSTODIANS_JSON`: lista JSON opcional para multiples custodios, con campos `id`, `name`, `wallet` y `contact`. Por ahora Nanopaquete usa el primer custodio valido de la lista.
 - `NANOPAQUETE_ADMIN_USER`: usuario admin, por defecto `admin`.
 - `NANOPAQUETE_ADMIN_PASSWORD`: clave admin, por defecto `nanopaquete`.

@@ -109,6 +109,7 @@ type ReleaseFeeIntent = {
 }
 
 type Store = {
+  custodians: Custodian[]
   sellerPaymentIntents: SellerPaymentIntent[]
   custodianAuthIntents: CustodianAuthIntent[]
   custodianSessions: CustodianSession[]
@@ -135,7 +136,7 @@ const defaultCustodians: Custodian[] = [
     wallet:
       process.env.NANOPAQUETE_ESCROW_WALLET ??
       'nano_1j7csyciamkzktswyxey5yt6f1rg1zbw3rtioe7xdze4fekkbo7zxri3ijxd',
-    contact: process.env.NANOPAQUETE_CUSTODIAN_CONTACT ?? '+57 3008188284',
+    contact: process.env.NANOPAQUETE_CUSTODIAN_CONTACT ?? '+573008188284',
   },
 ]
 
@@ -159,12 +160,28 @@ const getConfiguredCustodians = () => {
   }
 }
 
-const custodians = getConfiguredCustodians()
-const authorizedCustodianWallets = new Set(custodians.map((custodian) => custodian.wallet))
-const activeCustodian = custodians[0]
-const getCustodianById = (custodianId: string | undefined) =>
-  custodians.find((custodian) => custodian.id === custodianId) ?? activeCustodian
-const getCustodianByWallet = (wallet: string) => custodians.find((custodian) => custodian.wallet === wallet)
+const leaderCustodianId = defaultCustodians[0].id
+const sanitizeCustodians = (value: unknown) => {
+  const parsed = Array.isArray(value) ? (value as Custodian[]) : []
+  const seen = new Set<string>()
+  const valid = parsed.filter((custodian) => {
+    const id = normalizeText(custodian.id)
+    if (!id || seen.has(id)) return false
+    if (!normalizeText(custodian.name) || !isNanoAddress(custodian.wallet) || !normalizeText(custodian.contact)) return false
+    seen.add(id)
+    return true
+  })
+
+  const hasLeader = valid.some((custodian) => custodian.id === leaderCustodianId)
+  return hasLeader ? valid : [...defaultCustodians, ...valid.filter((custodian) => custodian.id !== leaderCustodianId)]
+}
+const getStoreCustodians = (store: Store) => sanitizeCustodians(store.custodians)
+const getActiveCustodian = (store: Store) => getStoreCustodians(store)[0]
+const getCustodianById = (store: Store, custodianId: string | undefined) =>
+  getStoreCustodians(store).find((custodian) => custodian.id === custodianId) ?? getActiveCustodian(store)
+const getCustodianByWallet = (store: Store, wallet: string) =>
+  getStoreCustodians(store).find((custodian) => custodian.wallet === wallet)
+const isLeaderSession = (session: CustodianSession | undefined) => session?.custodianId === leaderCustodianId
 const custodyFeeXno = process.env.NANOPAQUETE_CUSTODY_FEE_XNO ?? '0.1'
 const custodianAuthAmountXno = process.env.NANOPAQUETE_CUSTODIAN_AUTH_XNO ?? '0.01'
 const sellerPaymentTtlMs = Number(process.env.NANOPAQUETE_SELLER_PAYMENT_TTL_MS ?? 60 * 60 * 1000)
@@ -252,6 +269,7 @@ const readStore = async (): Promise<Store> => {
     const parsed = JSON.parse(content) as Partial<Store>
 
     return {
+      custodians: sanitizeCustodians(parsed.custodians ?? getConfiguredCustodians()),
       sellerPaymentIntents: Array.isArray(parsed.sellerPaymentIntents) ? parsed.sellerPaymentIntents : [],
       custodianAuthIntents: Array.isArray(parsed.custodianAuthIntents) ? parsed.custodianAuthIntents : [],
       custodianSessions: Array.isArray(parsed.custodianSessions) ? parsed.custodianSessions : [],
@@ -261,18 +279,29 @@ const readStore = async (): Promise<Store> => {
       usedPayments: Array.isArray(parsed.usedPayments) ? parsed.usedPayments : [],
     }
   } catch {
-    return { sellerPaymentIntents: [], custodianAuthIntents: [], custodianSessions: [], releaseFeeIntents: [], escrows: [], offers: [], usedPayments: [] }
+    return { custodians: sanitizeCustodians(getConfiguredCustodians()), sellerPaymentIntents: [], custodianAuthIntents: [], custodianSessions: [], releaseFeeIntents: [], escrows: [], offers: [], usedPayments: [] }
   }
 }
 
 const writeStore = async (store: Store) => {
   await mkdir(dirname(storePath), { recursive: true })
-  await writeFile(storePath, `${JSON.stringify(store, null, 2)}\n`)
+  await writeFile(storePath, `${JSON.stringify({ ...store, custodians: sanitizeCustodians(store.custodians) }, null, 2)}\n`)
 }
 
 const normalizeText = (value: unknown) => String(value ?? '').trim()
 const normalizeClientSessionId = (value: unknown) =>
   normalizeText(value).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80)
+const createCustodianId = (name: string) => {
+  const base = normalizeText(name)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 28) || 'custodio'
+
+  return `${base}-${randomBytes(3).toString('hex')}`
+}
 const isCurrency = (value: string): value is Currency => currencies.includes(value as Currency)
 
 const createCode = (digits: number) => {
@@ -349,16 +378,16 @@ const publicOffer = (offer: OfferRecord, context: { clientSessionId?: string; cu
   }
 }
 
-const takenOfferResponse = (offer: OfferRecord) => ({
+const takenOfferResponse = (store: Store, offer: OfferRecord) => ({
   offer: publicOffer(offer),
   sellerContact: offer.sellerContact,
   sellerCountry: offer.sellerCountry,
   sellerDialCode: offer.sellerDialCode,
-  custodianContact: getCustodianById(offer.custodianId).contact,
+  custodianContact: getCustodianById(store, offer.custodianId).contact,
 })
 
-const escrowSessionResponse = (escrow: EscrowRecord) => {
-  const custodian = getCustodianById(escrow.custodianId)
+const escrowSessionResponse = (store: Store, escrow: EscrowRecord) => {
+  const custodian = getCustodianById(store, escrow.custodianId)
 
   return {
   escrowId: escrow.id,
@@ -482,13 +511,127 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
   }
 
   if (request.method === 'GET' && url.pathname === '/api/custodians') {
+    const store = await readStore()
     sendJson(response, 200, {
-      custodians: custodians.map((custodian) => ({
+      custodians: getStoreCustodians(store).map((custodian) => ({
         id: custodian.id,
         name: custodian.name,
         contact: custodian.contact,
       })),
     })
+    return
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/custodian-admin/custodians') {
+    const custodianSessionId = normalizeClientSessionId(url.searchParams.get('custodianSessionId'))
+    const store = await readStore()
+    const custodianSession = getValidCustodianSession(store, custodianSessionId)
+
+    if (!custodianSession) {
+      await writeStore(store)
+      sendJson(response, 403, { error: 'Autenticacion de custodio preautorizado requerida.' })
+      return
+    }
+
+    await writeStore(store)
+    sendJson(response, 200, { custodians: getStoreCustodians(store), leaderCustodianId, canManage: isLeaderSession(custodianSession) })
+    return
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/custodian-admin/custodians') {
+    const body = await readJsonBody(request)
+    const custodianSessionId = normalizeClientSessionId(body.custodianSessionId)
+    const name = normalizeText(body.name)
+    const wallet = normalizeText(body.wallet)
+    const contact = normalizeText(body.contact)
+    const store = await readStore()
+    const custodianSession = getValidCustodianSession(store, custodianSessionId)
+
+    if (!isLeaderSession(custodianSession)) {
+      await writeStore(store)
+      sendJson(response, 403, { error: 'Solo el custodio lider puede agregar custodios.' })
+      return
+    }
+
+    if (!name || !contact || !isNanoAddress(wallet)) {
+      await writeStore(store)
+      sendJson(response, 400, { error: 'Ingresa nombre, wallet Nano valida y contacto del custodio.' })
+      return
+    }
+
+    const existingCustodians = getStoreCustodians(store)
+    if (existingCustodians.some((custodian) => custodian.wallet === wallet)) {
+      await writeStore(store)
+      sendJson(response, 409, { error: 'Ya existe un custodio con esa wallet.' })
+      return
+    }
+
+    if (existingCustodians.some((custodian) => custodian.contact === contact)) {
+      await writeStore(store)
+      sendJson(response, 409, { error: 'Ya existe un custodio con ese contacto.' })
+      return
+    }
+
+    const custodian: Custodian = {
+      id: createCustodianId(name),
+      name,
+      wallet,
+      contact,
+    }
+    store.custodians = [...existingCustodians, custodian]
+    await writeStore(store)
+
+    sendJson(response, 201, { custodian, custodians: getStoreCustodians(store), leaderCustodianId })
+    return
+  }
+
+  const deleteCustodianMatch = url.pathname.match(/^\/api\/custodian-admin\/custodians\/([^/]+)$/)
+
+  if (request.method === 'DELETE' && deleteCustodianMatch) {
+    const custodianId = decodeURIComponent(deleteCustodianMatch[1])
+    const body = await readJsonBody(request)
+    const custodianSessionId = normalizeClientSessionId(body.custodianSessionId)
+    const store = await readStore()
+    const custodianSession = getValidCustodianSession(store, custodianSessionId)
+
+    if (!isLeaderSession(custodianSession)) {
+      await writeStore(store)
+      sendJson(response, 403, { error: 'Solo el custodio lider puede eliminar custodios.' })
+      return
+    }
+
+    if (custodianId === leaderCustodianId) {
+      await writeStore(store)
+      sendJson(response, 409, { error: 'El custodio lider no se puede eliminar.' })
+      return
+    }
+
+    const existingCustodians = getStoreCustodians(store)
+    const custodian = existingCustodians.find((item) => item.id === custodianId)
+
+    if (!custodian) {
+      await writeStore(store)
+      sendJson(response, 404, { error: 'Custodio no encontrado.' })
+      return
+    }
+
+    const hasLinkedRecords =
+      store.offers.some((offer) => offer.custodianId === custodianId) ||
+      store.escrows.some((escrow) => escrow.custodianId === custodianId) ||
+      store.sellerPaymentIntents.some((intent) => intent.custodianId === custodianId)
+
+    if (hasLinkedRecords) {
+      await writeStore(store)
+      sendJson(response, 409, { error: 'No se puede eliminar un custodio con ofertas, custodias o depositos asociados.' })
+      return
+    }
+
+    store.custodians = existingCustodians.filter((item) => item.id !== custodianId)
+    store.custodianSessions = store.custodianSessions.filter((session) => session.custodianId !== custodianId)
+    store.custodianAuthIntents = store.custodianAuthIntents.filter((intent) => intent.custodianId !== custodianId)
+    await writeStore(store)
+
+    sendJson(response, 200, { custodians: getStoreCustodians(store), leaderCustodianId })
     return
   }
 
@@ -500,14 +643,14 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
         ['NEGOTIATION', 'RELEASING'].includes(item.status) && item.buyerSessionId === clientSessionId,
     )
 
-    sendJson(response, 200, { negotiation: offer ? takenOfferResponse(offer) : null })
+    sendJson(response, 200, { negotiation: offer ? takenOfferResponse(store, offer) : null })
     return
   }
 
   if (request.method === 'POST' && url.pathname === '/api/custodian-auth') {
     const body = await readJsonBody(request)
-    const custodian = getCustodianById(normalizeText(body.custodianId))
     const store = await readStore()
+    const custodian = getCustodianById(store, normalizeText(body.custodianId))
     const now = Date.now()
     store.custodianAuthIntents = store.custodianAuthIntents.filter(
       (intent) => intent.status !== 'PENDING' || new Date(intent.expiresAt).getTime() > now,
@@ -568,14 +711,14 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
         excludedHashes: store.usedPayments.map((item) => item.hash),
       })
 
-      if (!authorizedCustodianWallets.has(payment.senderWallet)) {
+      const authenticatedCustodian = getCustodianByWallet(store, payment.senderWallet)
+
+      if (!authenticatedCustodian) {
         sendJson(response, 403, { error: 'Esta wallet no esta autorizada como custodio.' })
         return
       }
 
-      const authenticatedCustodian = getCustodianByWallet(payment.senderWallet)
-
-      if (!authenticatedCustodian || authenticatedCustodian.id !== intent.custodianId) {
+      if (authenticatedCustodian.id !== intent.custodianId) {
         sendJson(response, 403, { error: 'Esta wallet no corresponde al custodio seleccionado.' })
         return
       }
@@ -592,7 +735,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       store.custodianSessions.push(session)
       store.usedPayments.push({ hash: payment.hash, purpose: 'custodian_auth', createdAt: new Date().toISOString() })
       await writeStore(store)
-      sendJson(response, 200, { sessionId: session.id, expiresAt: session.expiresAt, custodianId: authenticatedCustodian.id, custodianName: authenticatedCustodian.name })
+      sendJson(response, 200, { sessionId: session.id, expiresAt: session.expiresAt, custodianId: authenticatedCustodian.id, custodianName: authenticatedCustodian.name, isLeader: isLeaderSession(session) })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'No se pudo autenticar al custodio.'
       sendJson(response, 422, {
@@ -605,8 +748,8 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
   if (request.method === 'POST' && url.pathname === '/api/seller-payments') {
     const body = await readJsonBody(request)
     const clientSessionId = normalizeClientSessionId(body.clientSessionId)
-    const custodian = getCustodianById(normalizeText(body.custodianId))
     const store = await readStore()
+    const custodian = getCustodianById(store, normalizeText(body.custodianId))
     const now = Date.now()
     store.sellerPaymentIntents = store.sellerPaymentIntents.filter(
       (intent) => intent.status !== 'PENDING' || new Date(intent.expiresAt).getTime() > now,
@@ -661,7 +804,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
         sendJson(response, 409, { error: 'El pago fue verificado, pero falta la custodia asociada.' })
         return
       }
-      sendJson(response, 200, escrowSessionResponse(escrow))
+      sendJson(response, 200, escrowSessionResponse(store, escrow))
       return
     }
 
@@ -706,12 +849,12 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       store.usedPayments.push({ hash: payment.hash, purpose: 'seller_deposit', createdAt: new Date().toISOString() })
       await writeStore(store)
 
-      sendJson(response, 200, escrowSessionResponse(escrow))
+      sendJson(response, 200, escrowSessionResponse(store, escrow))
     } catch (error) {
       const recoverableEscrow = findRecoverableEscrow(store, clientSessionId)
 
       if (recoverableEscrow) {
-        sendJson(response, 200, escrowSessionResponse(recoverableEscrow))
+        sendJson(response, 200, escrowSessionResponse(store, recoverableEscrow))
         return
       }
 
@@ -786,7 +929,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     await writeStore(store)
 
     {
-      const custodian = getCustodianById(offer.custodianId)
+      const custodian = getCustodianById(store, offer.custodianId)
       sendJson(response, 201, { offer: publicOffer(offer), sellerPrivateCode: offer.sellerPrivateCode, custodianContact: custodian.contact, custodyFeeXno })
     }
     return
@@ -887,7 +1030,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     offer.takenAt = new Date().toISOString()
     await writeStore(store)
 
-    sendJson(response, 200, takenOfferResponse(offer))
+    sendJson(response, 200, takenOfferResponse(store, offer))
     return
   }
 
@@ -1008,13 +1151,14 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       return
     }
 
+    const custodian = getCustodianById(store, offer.custodianId)
     const intent: ReleaseFeeIntent = {
       id: `rel_${randomUUID().replaceAll('-', '').slice(0, 18)}`,
       offerId: offer.id,
       senderWallet: offer.sellerWallet,
-      receiverAddress: getCustodianById(offer.custodianId).wallet,
+      receiverAddress: custodian.wallet,
       amountXno: custodyFeeXno,
-      paymentUri: createNanoPaymentUri(getCustodianById(offer.custodianId).wallet, custodyFeeXno),
+      paymentUri: createNanoPaymentUri(custodian.wallet, custodyFeeXno),
       status: 'PENDING',
       createdAt: new Date(now).toISOString(),
       expiresAt: new Date(now + releaseFeeTtlMs).toISOString(),
@@ -1071,7 +1215,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     try {
       const payment = await findIncomingPaymentBySenderAmount({
         receiverWallet: offer.buyerNanoAddress,
-        senderWallet: getCustodianById(offer.custodianId).wallet,
+        senderWallet: getCustodianById(store, offer.custodianId).wallet,
         amountNano: offer.amountXno,
         createdAfter: offer.releaseRequestedAt,
         excludedHashes: store.usedPayments.map((item) => item.hash),
