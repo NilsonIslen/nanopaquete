@@ -67,6 +67,23 @@ button:disabled {
   opacity: 0.65;
 }
 
+.nano-logo {
+  width: 28px;
+  height: 28px;
+  display: block;
+}
+
+.nano-logo path {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-width: 2.3;
+}
+
+.nano-logo circle {
+  fill: currentColor;
+}
+
 .primary-button,
 .offer-card button {
   background: #1f5f8f;

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ArrowLeft, CheckCircle2, Copy, Download, Menu, PackageCheck, ShieldCheck, Wallet, X } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, Copy, Download, Menu, ShieldCheck, Wallet, X } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import {
   cancelTakenOffer,
@@ -116,6 +116,18 @@ const shortDate = (value: string) =>
 const openNanoPayment = (paymentUri: string) => {
   window.location.href = paymentUri
 }
+
+const NanoLogo = () => (
+  <svg className="nano-logo" viewBox="0 0 42 42" role="img" aria-label="Nano">
+    <path d="M13 21h16M16 15l10 12M26 15 16 27" />
+    <circle cx="13" cy="21" r="4.2" />
+    <circle cx="29" cy="21" r="4.2" />
+    <circle cx="16" cy="15" r="4.2" />
+    <circle cx="26" cy="15" r="4.2" />
+    <circle cx="16" cy="27" r="4.2" />
+    <circle cx="26" cy="27" r="4.2" />
+  </svg>
+)
 
 const getAmountValue = (value: string) => {
   const parsed = Number(value.replace(',', '.'))
@@ -533,7 +545,7 @@ export function Nanopaquete() {
       <header className="topbar">
         <div className="brand-lockup">
           <span className="brand-icon" aria-hidden="true">
-            <PackageCheck size={26} />
+            <NanoLogo />
           </span>
           <div>
             <h1>Nanopaquete</h1>
@@ -624,7 +636,8 @@ export function Nanopaquete() {
         <section className="single-page-panel">
           <div className="panel">
             <h2>Descargar wallet</h2>
-            <p>Instala Nautilus para crear o usar una wallet Nano compatible antes de comprar o vender XNO.</p>
+            <p>Nautilus es un monedero para Nano. Te permite recibir, guardar y enviar tus XNO desde el celular, y lo necesitas para copiar tu direccion o abrir los pagos que genera Nanopaquete.</p>
+            <p>Instalalo antes de comprar o vender para tener lista la wallet donde recibiras o desde donde enviaras Nano.</p>
             <a className="wallet-download-link standalone-link" href={nautilusDownloadUrl} target="_blank" rel="noreferrer">
               <Download size={17} />
               Abrir Nautilus
