@@ -253,6 +253,12 @@ const publicOffer = (offer: OfferRecord) => ({
   price: offer.price,
   status: offer.status,
   createdAt: offer.createdAt,
+  ...(offer.status === 'RELEASING' && offer.buyerNanoAddress
+    ? {
+        buyerNanoAddress: offer.buyerNanoAddress,
+        custodianReleaseUri: createNanoPaymentUri(offer.buyerNanoAddress, offer.amountXno),
+      }
+    : {}),
 })
 
 const takenOfferResponse = (offer: OfferRecord) => ({

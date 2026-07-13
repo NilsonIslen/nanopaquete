@@ -505,3 +505,14 @@ dd {
 .inline-release-fee-box {
   margin-top: 2px;
 }
+
+.custodian-release-box {
+  grid-column: 1 / -1;
+  border-color: #8bbf73;
+  background: #f4faf2;
+}
+
+.custodian-release-box > p {
+  color: #3f4f42;
+  line-height: 1.5;
+}
