@@ -435,3 +435,15 @@ dd {
   color: #4f3b0b;
   line-height: 1.5;
 }
+
+.selected-offer-card {
+  grid-template-columns: 1fr;
+  border-color: #206b3a;
+  background: #f4faf2;
+  box-shadow: 0 0 0 3px rgba(32, 107, 58, 0.12);
+}
+
+.inline-take-form {
+  border-top: 1px solid #cfe0c9;
+  margin-top: 2px;
+}

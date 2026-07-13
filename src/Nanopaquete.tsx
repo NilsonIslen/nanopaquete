@@ -359,46 +359,52 @@ export function Nanopaquete() {
           </div>
 
           <div className="offer-list">
-            {offers.map((offer) => (
-              <article className="offer-card" key={offer.id}>
-                <div>
-                  <p className="offer-amount">{offer.amountXno} XNO</p>
-                  <p>{offer.price} {offer.currency}</p>
-                  <small>Publicada {shortDate(offer.createdAt)}</small>
-                </div>
-                <button type="button" onClick={() => setSelectedOffer(offer)}>
-                  Tomar oferta
-                </button>
-              </article>
-            ))}
+            {offers.map((offer) => {
+              const isSelected = selectedOffer?.id === offer.id
+
+              return (
+                <article className={isSelected ? 'offer-card selected-offer-card' : 'offer-card'} key={offer.id}>
+                  <div>
+                    <p className="offer-amount">{offer.amountXno} XNO</p>
+                    <p>{offer.price} {offer.currency}</p>
+                    <small>Publicada {shortDate(offer.createdAt)}</small>
+                  </div>
+                  {!isSelected && (
+                    <button type="button" onClick={() => setSelectedOffer(offer)}>
+                      Tomar oferta
+                    </button>
+                  )}
+                  {isSelected && (
+                    <form className="take-form inline-take-form" onSubmit={handleTakeOffer}>
+                      <div>
+                        <p className="eyebrow">Tomar oferta</p>
+                        <h3>{offer.amountXno} XNO por {offer.price} {offer.currency}</h3>
+                      </div>
+                      <label>
+                        Wallet nano donde recibiras los XNO
+                        <input
+                          placeholder="nano_..."
+                          value={buyerNanoAddress}
+                          onChange={(event) => setBuyerNanoAddress(event.target.value)}
+                          required
+                          autoFocus
+                        />
+                      </label>
+                      <div className="button-row">
+                        <button className="primary-button" type="submit" disabled={loading === 'take'}>
+                          Confirmar
+                        </button>
+                        <button className="ghost-button" type="button" onClick={() => setSelectedOffer(null)}>
+                          Cancelar
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </article>
+              )
+            })}
             {!offers.length && <p className="empty-state">No hay ofertas activas en este momento.</p>}
           </div>
-
-          {selectedOffer && (
-            <form className="take-form" onSubmit={handleTakeOffer}>
-              <div>
-                <p className="eyebrow">Tomar oferta</p>
-                <h3>{selectedOffer.amountXno} XNO por {selectedOffer.price} {selectedOffer.currency}</h3>
-              </div>
-              <label>
-                Wallet nano donde recibiras los XNO
-                <input
-                  placeholder="nano_..."
-                  value={buyerNanoAddress}
-                  onChange={(event) => setBuyerNanoAddress(event.target.value)}
-                  required
-                />
-              </label>
-              <div className="button-row">
-                <button className="primary-button" type="submit" disabled={loading === 'take'}>
-                  Confirmar
-                </button>
-                <button className="ghost-button" type="button" onClick={() => setSelectedOffer(null)}>
-                  Cancelar
-                </button>
-              </div>
-            </form>
-          )}
 
           {takenOffer && (
             <div className="private-box buyer-result">
