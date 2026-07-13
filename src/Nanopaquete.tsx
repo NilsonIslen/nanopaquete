@@ -653,8 +653,9 @@ export function Nanopaquete() {
           </div>
         </div>
         <div className="topbar-actions menu-area">
-          <button className="icon-button" type="button" onClick={() => setIsMenuOpen((current) => !current)} aria-label="Abrir menu" title="Menu">
+          <button className="icon-button menu-trigger" type="button" onClick={() => setIsMenuOpen((current) => !current)} aria-label="Abrir menu" title="Menu">
             <Menu size={20} />
+            <span>Menu</span>
           </button>
           {isMenuOpen && (
             <div className="app-menu">
@@ -838,9 +839,9 @@ export function Nanopaquete() {
             <h3>Vendedor</h3>
             <p>El vendedor publica una oferta de Nano. Para hacerlo, primero debe transferir al custodio seleccionado el monto exacto de XNO que quiere vender.</p>
             <p>Cuando Nanopaquete detecta la transferencia, habilita un formulario para indicar qué activo espera recibir a cambio y el precio de su paquete. Después de publicar, solo puede editar el precio.</p>
-            <p>Si el vendedor necesita retirar los fondos de una oferta publicada, debe simular una compra desde un equipo distinto al que usó para publicarla. En ese proceso también debe pagar los 0.1 XNO al custodio para que los fondos puedan liberarse.</p>
+            <p>Si el vendedor necesita retirar los fondos de una oferta publicada, debe simular una compra desde un equipo distinto al que usó para publicarla. En ese proceso también debe pagar los 0,1 XNO al custodio para que los fondos puedan liberarse.</p>
             <p>Cuando un comprador toma una oferta, esta queda bloqueada junto con sus fondos. El vendedor recibe la información de contacto del comprador y solo puede liberar esos XNO hacia la wallet registrada por ese comprador.</p>
-            <p>Cuando recibe el pago acordado, el vendedor lo confirma desde la plataforma mediante una transferencia de 0.1 XNO al custodio. Esa confirmación habilita al custodio para liberar los fondos exclusivamente al comprador.</p>
+            <p>Cuando recibe el pago acordado, el vendedor lo confirma desde la plataforma mediante una transferencia de 0,1 XNO al custodio. Esa confirmación habilita al custodio para liberar los fondos exclusivamente al comprador.</p>
             <h3>Comprador</h3>
             <p>El comprador es cualquier persona que toma una de las ofertas publicadas. Al hacerlo, ingresa la dirección Nano donde quiere recibir los fondos y su número de contacto.</p>
             <p>Después de enviar esa información, recibe el contacto del vendedor para comunicarse y acordar cómo realizar el pago. Durante la negociación, los XNO quedan bajo custodia para que pueda pagar con mayor tranquilidad.</p>
@@ -849,12 +850,12 @@ export function Nanopaquete() {
             <p>El custodio es una persona de confianza directa de la plataforma y forma parte de un grupo de custodios que sirven como intermediarios en las negociaciones.</p>
             <p>En condiciones normales, el proceso es automático: cuando el vendedor confirma que recibió el pago, el custodio solo libera los fondos al comprador desde la opción habilitada, sin validaciones adicionales.</p>
             <p>El custodio interviene cuando hay conflicto. En ese caso solicita comprobantes, revisa la situación y decide si libera los fondos al comprador o libera la oferta según corresponda.</p>
-            <p>Cada custodio recibe 0.1 XNO por intermediación, pagados por el vendedor al confirmar que recibió el pago de su contraparte.</p>
+            <p>Cada custodio recibe 0,1 XNO por intermediación, pagados por el vendedor al confirmar que recibió el pago de su contraparte.</p>
             <p>Si un usuario pierde dinero por equivocación o mala fe de un custodio, los demás custodios deben reponer la pérdida del usuario y determinar si el custodio responsable continúa o es expulsado.</p>
             <h3>Líderes</h3>
             <p>Puede haber uno o varios líderes. Los líderes intermedian entre custodios y desarrolladores para mantener la plataforma funcionando y en constante actualización. También incluyen o expulsan custodios a nivel técnico según las solicitudes del grupo.</p>
             <p>Los líderes también son custodios y tienen las mismas posibilidades de recibir ingresos que los demás custodios. Su trabajo adicional como líderes es un aporte voluntario y no reciben pago extra por esa función, conservando la naturaleza de Nano: personas que aportan a la red por principios propios y convicción sobre el proyecto.</p>
-            <p>La única excepción es la autenticación de custodios: cuando un custodio inicia sesión, Nanopaquete asigna aleatoriamente una cuenta Nano de un líder para recibir 0.01 XNO. Ese monto es mínimo y representativo; su finalidad es cumplir la función técnica de autenticar custodios, no pagar una retribución adicional por liderazgo.</p>
+            <p>La única excepción es la autenticación de custodios: cuando un custodio inicia sesión, Nanopaquete asigna aleatoriamente una cuenta Nano de un líder para recibir 0,01 XNO. Ese monto es mínimo y representativo; su finalidad es cumplir la función técnica de autenticar custodios, no pagar una retribución adicional por liderazgo.</p>
             <p>Contacto del líder principal: <strong>+573008188284</strong>.</p>
             <h3>Posibles disputas</h3>
             <div className="guide-disputes">
@@ -878,7 +879,7 @@ export function Nanopaquete() {
           <div className="panel-heading">
             <h2>Crear oferta</h2>
             <p>Vas a poner en venta la cantidad de XNO que deposites en custodia. Primero transfiere el monto exacto al custodio seleccionado; cuando Nanopaquete detecte el depósito, podrás indicar qué activo y cuánto esperas recibir a cambio.</p>
-            <p>Este proceso es irreversible desde esta pantalla. Si después necesitas reembolsar los fondos de la oferta, debes simular una compra desde otro dispositivo y pagar la comisión de 0,01 XNO para que el custodio pueda liberarlos.</p>
+            <p>Este proceso es irreversible desde esta pantalla. Si después necesitas reembolsar los fondos de la oferta, debes simular una compra desde otro dispositivo y pagar la comisión de 0,1 XNO para que el custodio pueda liberarlos.</p>
           </div>
 
           {!sellerPayment && !escrowSession && (
