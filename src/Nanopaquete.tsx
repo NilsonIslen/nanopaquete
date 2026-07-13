@@ -519,27 +519,6 @@ export function Nanopaquete() {
     }
   }
 
-  const handleCloseAllSessions = async () => {
-    setSellerPayment(null)
-    setTakenOffer(null)
-    setCustodianSession(null)
-    setCustodianAuthIntent(null)
-    setReleaseFeeIntent(null)
-    setSelectedOffer(null)
-    setActiveView('offers')
-    setError(null)
-    window.localStorage.removeItem(sellerPaymentStorageKey)
-    window.localStorage.removeItem(takenOfferStorageKey)
-    window.localStorage.removeItem(custodianSessionStorageKey)
-
-    try {
-      const response = await getOffers(clientSessionId)
-      setOffers(response.offers)
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'No se pudieron cargar las ofertas.')
-    }
-  }
-
   const handleCancelTakenOffer = async () => {
     if (!takenOffer) return
     setError(null)
@@ -582,7 +561,6 @@ export function Nanopaquete() {
               <button type="button" onClick={() => { setActiveView('wallet'); setIsMenuOpen(false) }}>Descargar wallet (Nautilus)</button>
               <button type="button" onClick={() => { setActiveView('custodian-auth'); setIsMenuOpen(false) }}>Autenticacion custodio</button>
               <button type="button" onClick={() => { setActiveView('guide'); setIsMenuOpen(false) }}>Guia</button>
-              <button type="button" onClick={() => { void handleCloseAllSessions(); setIsMenuOpen(false) }}>Cerrar sesion</button>
             </div>
           )}
         </div>
