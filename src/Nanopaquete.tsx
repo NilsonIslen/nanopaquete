@@ -655,6 +655,7 @@ export function Nanopaquete() {
             <h3>Vendedor</h3>
             <p>El vendedor publica una oferta de Nano. Para hacerlo, primero debe transferir al custodio seleccionado el monto exacto de XNO que quiere vender.</p>
             <p>Cuando Nanopaquete detecta la transferencia, habilita un formulario para indicar qué activo espera recibir a cambio y el precio de su paquete. Después de publicar, solo puede editar el precio.</p>
+            <p>Si el vendedor necesita retirar los fondos de una oferta publicada, debe simular una compra desde un equipo distinto al que usó para publicarla. En ese proceso también debe pagar los 0.1 XNO al custodio para que los fondos puedan liberarse.</p>
             <p>Cuando un comprador toma una oferta, esta queda bloqueada junto con sus fondos. El vendedor recibe la información de contacto del comprador y solo puede liberar esos XNO hacia la wallet registrada por ese comprador.</p>
             <p>Cuando recibe el pago acordado, el vendedor lo confirma desde la plataforma mediante una transferencia de 0.1 XNO al custodio. Esa confirmación habilita al custodio para liberar los fondos exclusivamente al comprador.</p>
             <h3>Comprador</h3>
