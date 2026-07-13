@@ -121,12 +121,12 @@ const openNanoPayment = (paymentUri: string) => {
 const NanoLogo = () => (
   <svg className="nano-logo" viewBox="0 0 42 42" role="img" aria-label="Nano">
     <path d="M13 21h16M16 15l10 12M26 15 16 27" />
-    <circle cx="13" cy="21" r="4.2" />
-    <circle cx="29" cy="21" r="4.2" />
-    <circle cx="16" cy="15" r="4.2" />
-    <circle cx="26" cy="15" r="4.2" />
-    <circle cx="16" cy="27" r="4.2" />
-    <circle cx="26" cy="27" r="4.2" />
+    <rect x="8.8" y="16.8" width="8.4" height="8.4" />
+    <rect x="24.8" y="16.8" width="8.4" height="8.4" />
+    <rect x="11.8" y="10.8" width="8.4" height="8.4" />
+    <rect x="21.8" y="10.8" width="8.4" height="8.4" />
+    <rect x="11.8" y="22.8" width="8.4" height="8.4" />
+    <rect x="21.8" y="22.8" width="8.4" height="8.4" />
   </svg>
 )
 
@@ -566,6 +566,15 @@ export function Nanopaquete() {
         </div>
       </header>
 
+      {activeView !== 'offers' && (
+        <section className="page-toolbar">
+          <button className="ghost-button" type="button" onClick={() => setActiveView('offers')}>
+            <ArrowLeft size={17} />
+            Volver a ofertas
+          </button>
+        </section>
+      )}
+
       {activeView === 'custodian-auth' && !custodianAuthIntent && (
         <section className="single-page-panel">
           <div className="panel">
@@ -620,15 +629,6 @@ export function Nanopaquete() {
       )}
 
       {error && <div className="status-message error">{error}</div>}
-
-      {activeView !== 'offers' && (
-        <section className="page-toolbar">
-          <button className="ghost-button" type="button" onClick={() => setActiveView('offers')}>
-            <ArrowLeft size={17} />
-            Volver a ofertas
-          </button>
-        </section>
-      )}
 
       {activeView === 'wallet' && (
         <section className="single-page-panel">
@@ -691,6 +691,7 @@ export function Nanopaquete() {
         <div className="panel seller-panel">
           <div className="panel-heading">
             <h2>Crear oferta</h2>
+            <p>Vas a poner en venta la cantidad de XNO que deposites en custodia. Primero transfiere el monto exacto al custodio seleccionado; cuando Nanopaquete detecte el depósito, podrás indicar qué activo y cuánto esperas recibir a cambio.</p>
           </div>
 
           {!sellerPayment && !escrowSession && (

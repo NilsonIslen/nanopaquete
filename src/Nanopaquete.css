@@ -80,7 +80,7 @@ button:disabled {
   stroke-width: 2.3;
 }
 
-.nano-logo circle {
+.nano-logo rect {
   fill: currentColor;
 }
 
@@ -159,6 +159,11 @@ button:disabled {
 .panel-heading {
   display: grid;
   gap: 6px;
+}
+
+.panel-heading p {
+  color: #3d4f63;
+  line-height: 1.55;
 }
 
 .inline-heading {
