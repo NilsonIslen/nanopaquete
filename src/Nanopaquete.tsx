@@ -1210,7 +1210,7 @@ export function Nanopaquete() {
                         <h3>{offer.amountXno} XNO por {offer.price} {offer.currency}</h3>
                       </div>
                       <label>
-                        Wallet nano donde recibiras los XNO
+                        Cuenta Nano donde recibirás los XNO
                         <input
                           placeholder="nano_..."
                           value={buyerForm.nanoAddress}
