@@ -157,6 +157,8 @@ type Custodian = {
   name: string
   wallet: string
   contact: string
+  country?: string
+  dialCode?: string
   isLeader?: boolean
 }
 
@@ -167,6 +169,8 @@ const defaultCustodians: Custodian[] = [
     wallet:
       process.env.NANOPAQUETE_ESCROW_WALLET ??
       'nano_1j7csyciamkzktswyxey5yt6f1rg1zbw3rtioe7xdze4fekkbo7zxri3ijxd',
+    country: 'Colombia',
+    dialCode: '+57',
     contact: process.env.NANOPAQUETE_CUSTODIAN_CONTACT ?? '+573008188284',
     isLeader: true,
   },
@@ -565,6 +569,8 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
         id: custodian.id,
         name: custodian.name,
         contact: custodian.contact,
+        country: custodian.country,
+        dialCode: custodian.dialCode,
         wallet: custodian.wallet,
         isLeader: custodian.isLeader,
       })),
@@ -593,6 +599,8 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     const custodianSessionId = normalizeClientSessionId(body.custodianSessionId)
     const name = normalizeText(body.name)
     const wallet = normalizeText(body.wallet)
+    const country = normalizeText(body.country)
+    const dialCode = normalizeText(body.dialCode)
     const contact = normalizeText(body.contact)
     const store = await readStore()
     const custodianSession = getValidCustodianSession(store, custodianSessionId)
@@ -603,9 +611,9 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       return
     }
 
-    if (!name || !contact || !isNanoAddress(wallet)) {
+    if (!name || !country || !dialCode || !contact || !isNanoAddress(wallet)) {
       await writeStore(store)
-      sendJson(response, 400, { error: 'Ingresa nombre, wallet Nano valida y contacto del custodio.' })
+      sendJson(response, 400, { error: 'Ingresa nombre, wallet Nano valida, pais y contacto del custodio.' })
       return
     }
 
@@ -626,6 +634,8 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       id: createCustodianId(name),
       name,
       wallet,
+      country,
+      dialCode,
       contact,
       isLeader: Boolean(body.isLeader),
     }

@@ -155,6 +155,8 @@ const initialBuyerForm = {
 const initialCustodianForm = {
   name: '',
   wallet: '',
+  country: 'Colombia',
+  dialCode: '+57',
   contact: '',
   isLeader: false,
 }
@@ -463,7 +465,9 @@ export function Nanopaquete() {
         custodianSessionId: custodianSession.sessionId,
         name: custodianForm.name,
         wallet: custodianForm.wallet,
-        contact: custodianForm.contact,
+        country: custodianForm.country,
+        dialCode: custodianForm.dialCode,
+        contact: `${custodianForm.dialCode} ${custodianForm.contact}`.trim(),
         isLeader: custodianForm.isLeader,
       })
       setManagedCustodians(response.custodians)
@@ -814,6 +818,7 @@ export function Nanopaquete() {
                         <article className="custodian-list-item" key={custodian.id}>
                           <div>
                             <strong>{custodian.name}</strong>
+                            <span>{custodian.country || 'Pais no informado'}</span>
                             <span>{custodian.contact}</span>
                             <small>{custodian.wallet}</small>
                           </div>
@@ -863,6 +868,21 @@ export function Nanopaquete() {
                       <label>
                         Wallet Nano
                         <input value={custodianForm.wallet} onChange={(event) => updateCustodianForm('wallet', event.target.value)} required />
+                      </label>
+                      <label>
+                        Pais
+                        <select
+                          value={custodianForm.country}
+                          onChange={(event) => {
+                            const selected = contactCountries.find((item) => item.country === event.target.value)
+                            updateCustodianForm('country', event.target.value)
+                            updateCustodianForm('dialCode', selected?.dialCode ?? '')
+                          }}
+                        >
+                          {contactCountries.map((item) => (
+                            <option key={item.country} value={item.country}>{item.country}</option>
+                          ))}
+                        </select>
                       </label>
                       <label>
                         Contacto
@@ -992,8 +1012,8 @@ export function Nanopaquete() {
             <h3>Condiciones generales</h3>
             <p>Nanopaquete organiza negociaciones P2P con custodia Nano. La plataforma no persigue el precio del mercado: cada vendedor define cuánto espera recibir por su paquete de XNO y cada comprador decide qué oferta tomar. Esa competencia interna ayuda a evitar precios inflados o devaluados, siempre bajo el criterio de quienes poseen y demandan Nano.</p>
             <h3>Vendedor</h3>
-            <p>El vendedor publica una oferta de Nano. Para hacerlo, primero debe transferir al custodio seleccionado el monto exacto de XNO que quiere vender.</p>
-            <p>Cuando Nanopaquete detecta la transferencia, habilita un formulario para indicar qué activo espera recibir a cambio y el precio de su paquete. Después de publicar, solo puede editar el precio.</p>
+            <p>El vendedor publica una oferta de Nano indicando primero la cantidad de XNO que quiere vender, el activo que espera recibir, el precio total del paquete y su contacto.</p>
+            <p>Con esos datos, Nanopaquete genera el pago exacto hacia el custodio seleccionado. Cuando detecta la transferencia, publica la oferta automáticamente. Después de publicar, el vendedor solo puede editar el precio.</p>
             <p>Si el vendedor necesita retirar los fondos de una oferta publicada, debe simular una compra desde un equipo distinto al que usó para publicarla. En ese proceso también debe pagar los 0,1 XNO al custodio para que los fondos puedan liberarse.</p>
             <p>Cuando un comprador toma una oferta, esta queda bloqueada junto con sus fondos. El vendedor recibe la información de contacto del comprador y solo puede liberar esos XNO hacia la wallet registrada por ese comprador.</p>
             <p>Cuando recibe el pago acordado, el vendedor lo confirma desde la plataforma mediante una transferencia de 0,1 XNO al custodio. Esa confirmación habilita al custodio para liberar los fondos exclusivamente al comprador.</p>
@@ -1243,6 +1263,41 @@ export function Nanopaquete() {
                       Confirmar pago
                     </button>
                   )}
+                  {releaseFeeIntent?.offerId === offer.id && (
+                    <div className="private-box release-fee-box inline-release-fee-box">
+                      <p className="eyebrow">Confirmar pago recibido</p>
+                      <h3>Paga {releaseFeeIntent.amountXno} XNO desde la wallet vendedora a la custodia.</h3>
+                      <p>Cuando la app detecte esa transferencia, la oferta pasara a estado liberando y el custodio podra enviar los fondos a la wallet registrada por el comprador.</p>
+                      <div className="payment-actions">
+                        <button className="primary-button" type="button" onClick={() => openNanoPayment(releaseFeeIntent.paymentUri)}>
+                          <Wallet size={18} />
+                          Pagar comision
+                        </button>
+                        <button className="ghost-button" type="button" onClick={() => void copyValue(releaseFeeIntent.receiverAddress)}>
+                          <Copy size={16} />
+                          Copiar custodia
+                        </button>
+                      </div>
+                      <div className="payment-qr" aria-label="QR de comision de liberacion">
+                        <QRCodeSVG value={releaseFeeIntent.paymentUri} size={176} marginSize={2} />
+                      </div>
+                      <dl>
+                        <dt>Desde wallet</dt>
+                        <dd>{releaseFeeIntent.senderWallet}</dd>
+                        <dt>Hacia custodia</dt>
+                        <dd>{releaseFeeIntent.receiverAddress}</dd>
+                        <dt>Monto</dt>
+                        <dd>{releaseFeeIntent.amountXno} XNO</dd>
+                      </dl>
+                      <button className="primary-button" type="button" onClick={handleVerifyReleaseFee} disabled={loading === 'release-verify'}>
+                        Verificar comision
+                      </button>
+                      <button className="ghost-button danger-button" type="button" onClick={() => setReleaseFeeIntent(null)}>
+                        <X size={16} />
+                        Cerrar
+                      </button>
+                    </div>
+                  )}
                   {offer.canConfirmPayment && offer.buyerContact && (
                     <div className="private-box seller-buyer-box">
                       <p className="eyebrow">Comprador de esta oferta</p>
@@ -1321,41 +1376,6 @@ export function Nanopaquete() {
                     >
                       Tomar oferta
                     </button>
-                  )}
-                  {releaseFeeIntent?.offerId === offer.id && (
-                    <div className="private-box release-fee-box inline-release-fee-box">
-                      <p className="eyebrow">Confirmar pago recibido</p>
-                      <h3>Paga {releaseFeeIntent.amountXno} XNO desde la wallet vendedora a la custodia.</h3>
-                      <p>Cuando la app detecte esa transferencia, la oferta pasara a estado liberando y el custodio podra enviar los fondos a la wallet registrada por el comprador.</p>
-                      <div className="payment-actions">
-                        <button className="primary-button" type="button" onClick={() => openNanoPayment(releaseFeeIntent.paymentUri)}>
-                          <Wallet size={18} />
-                          Pagar comision
-                        </button>
-                        <button className="ghost-button" type="button" onClick={() => void copyValue(releaseFeeIntent.receiverAddress)}>
-                          <Copy size={16} />
-                          Copiar custodia
-                        </button>
-                      </div>
-                      <div className="payment-qr" aria-label="QR de comision de liberacion">
-                        <QRCodeSVG value={releaseFeeIntent.paymentUri} size={176} marginSize={2} />
-                      </div>
-                      <dl>
-                        <dt>Desde wallet</dt>
-                        <dd>{releaseFeeIntent.senderWallet}</dd>
-                        <dt>Hacia custodia</dt>
-                        <dd>{releaseFeeIntent.receiverAddress}</dd>
-                        <dt>Monto</dt>
-                        <dd>{releaseFeeIntent.amountXno} XNO</dd>
-                      </dl>
-                      <button className="primary-button" type="button" onClick={handleVerifyReleaseFee} disabled={loading === 'release-verify'}>
-                        Verificar comision
-                      </button>
-                      <button className="ghost-button danger-button" type="button" onClick={() => setReleaseFeeIntent(null)}>
-                        <X size={16} />
-                        Cerrar
-                      </button>
-                    </div>
                   )}
                   {isSelected && (
                     <form className="take-form inline-take-form" onSubmit={handleTakeOffer}>

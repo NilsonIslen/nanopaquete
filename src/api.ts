@@ -39,6 +39,8 @@ export type CustodianOption = {
   id: string
   name: string
   contact: string
+  country?: string
+  dialCode?: string
   wallet?: string
   isLeader?: boolean
 }
@@ -264,7 +266,7 @@ export const getManagedCustodians = (custodianSessionId: string) =>
     `/custodian-admin/custodians?custodianSessionId=${encodeURIComponent(custodianSessionId)}`,
   )
 
-export const addManagedCustodian = (payload: { custodianSessionId: string; name: string; wallet: string; contact: string; isLeader: boolean }) =>
+export const addManagedCustodian = (payload: { custodianSessionId: string; name: string; wallet: string; country: string; dialCode: string; contact: string; isLeader: boolean }) =>
   requestJson<{ custodian: ManagedCustodian; custodians: ManagedCustodian[] }>(
     '/custodian-admin/custodians',
     {
