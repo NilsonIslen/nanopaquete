@@ -39,6 +39,7 @@ const currencies: Currency[] = ['COP', 'USD', 'BTC', 'EUR']
 type AppView = 'offers' | 'create-offer' | 'wallet' | 'custodian-auth' | 'guide'
 
 const nautilusDownloadUrl = 'https://nautilus.io/'
+const natriumDownloadUrl = 'https://natrium.io/'
 
 const contactCountries = [
   { country: 'Colombia', dialCode: '+57' },
@@ -129,18 +130,6 @@ const openNanoPayment = (paymentUri: string) => {
   window.location.href = paymentUri
 }
 
-const NanoLogo = () => (
-  <svg className="nano-logo" viewBox="0 0 42 42" role="img" aria-label="Nano">
-    <path d="M13 21h16M16 15l10 12M26 15 16 27" />
-    <rect x="8.8" y="16.8" width="8.4" height="8.4" />
-    <rect x="24.8" y="16.8" width="8.4" height="8.4" />
-    <rect x="11.8" y="10.8" width="8.4" height="8.4" />
-    <rect x="21.8" y="10.8" width="8.4" height="8.4" />
-    <rect x="11.8" y="22.8" width="8.4" height="8.4" />
-    <rect x="21.8" y="22.8" width="8.4" height="8.4" />
-  </svg>
-)
-
 const getAmountValue = (value: string) => {
   const parsed = Number(value.replace(',', '.'))
   return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER
@@ -198,6 +187,11 @@ export function Nanopaquete() {
   const canManageCustodians = Boolean(
     custodianSession?.isLeader || (leaderCustodianId && custodianSession?.custodianId === leaderCustodianId),
   )
+  const displayedManagedCustodians = [...managedCustodians].sort((left, right) => {
+    if (left.id === custodianSession?.custodianId) return -1
+    if (right.id === custodianSession?.custodianId) return 1
+    return left.name.localeCompare(right.name, 'es')
+  })
 
   const loadOffers = async () => {
     setError(null)
@@ -636,7 +630,7 @@ export function Nanopaquete() {
       <header className="topbar">
         <div className="brand-lockup">
           <span className="brand-icon" aria-hidden="true">
-            <NanoLogo />
+            <img src="/icnano.png" alt="" />
           </span>
           <div>
             <h1>Nanopaquete</h1>
@@ -650,8 +644,8 @@ export function Nanopaquete() {
           {isMenuOpen && (
             <div className="app-menu">
               <button type="button" onClick={() => { setActiveView('create-offer'); setIsMenuOpen(false) }}>Crear oferta</button>
-              <button type="button" onClick={() => { setActiveView('wallet'); setIsMenuOpen(false) }}>Descargar wallet (Nautilus)</button>
-              <button type="button" onClick={() => { setActiveView('custodian-auth'); setIsMenuOpen(false) }}>Autenticacion custodio</button>
+              <button type="button" onClick={() => { setActiveView('wallet'); setIsMenuOpen(false) }}>Descargar wallet</button>
+              <button type="button" onClick={() => { setActiveView('custodian-auth'); setIsMenuOpen(false) }}>Custodios</button>
               <button type="button" onClick={() => { setActiveView('guide'); setIsMenuOpen(false) }}>Guia</button>
             </div>
           )}
@@ -670,25 +664,17 @@ export function Nanopaquete() {
       {activeView === 'custodian-auth' && !custodianAuthIntent && (
         <section className="single-page-panel">
           <div className="panel">
-            <h2>Autenticacion custodio</h2>
+            <h2>Custodios</h2>
             <p>Acceso solo para cuentas autorizadas.</p>
             {custodianSession ? (
               <>
-                <div className="private-box">
-                  <p>Custodio autenticado: <strong>{custodianSession.custodianName}</strong></p>
-                  <button className="ghost-button danger-button" type="button" onClick={() => void handleCloseCustodianSession()}>
-                    <X size={16} />
-                    Cerrar sesion
-                  </button>
-                </div>
                 {!!managedCustodians.length && (
                   <div className="private-box custodian-admin-box">
                     <div className="panel-heading">
                       <h3>Custodios</h3>
-                      <p>Lista privada para custodios autenticados. Solo el custodio lider puede agregar o eliminar custodios.</p>
                     </div>
                     <div className="custodian-list">
-                      {managedCustodians.map((custodian) => (
+                      {displayedManagedCustodians.map((custodian) => (
                         <article className="custodian-list-item" key={custodian.id}>
                           <div>
                             <strong>{custodian.name}</strong>
@@ -713,32 +699,41 @@ export function Nanopaquete() {
                         </article>
                       ))}
                     </div>
-                    {canManageCustodians && (
-                      <form className="stack-form custodian-admin-form" onSubmit={handleAddCustodian}>
-                        <label>
-                          Nombre
-                          <input value={custodianForm.name} onChange={(event) => updateCustodianForm('name', event.target.value)} required />
-                        </label>
-                        <label>
-                          Wallet Nano
-                          <input value={custodianForm.wallet} onChange={(event) => updateCustodianForm('wallet', event.target.value)} required />
-                        </label>
-                        <label>
-                          Contacto
-                          <input value={custodianForm.contact} onChange={(event) => updateCustodianForm('contact', event.target.value)} required />
-                        </label>
-                        <button className="primary-button" type="submit" disabled={loading === 'custodian-add'}>
-                          Agregar custodio
-                        </button>
-                      </form>
-                    )}
                   </div>
                 )}
+                {canManageCustodians && (
+                  <div className="private-box custodian-admin-box">
+                    <div className="panel-heading">
+                      <h3>Agregar custodio</h3>
+                    </div>
+                    <form className="stack-form custodian-admin-form" onSubmit={handleAddCustodian}>
+                      <label>
+                        Nombre
+                        <input value={custodianForm.name} onChange={(event) => updateCustodianForm('name', event.target.value)} required />
+                      </label>
+                      <label>
+                        Wallet Nano
+                        <input value={custodianForm.wallet} onChange={(event) => updateCustodianForm('wallet', event.target.value)} required />
+                      </label>
+                      <label>
+                        Contacto
+                        <input value={custodianForm.contact} onChange={(event) => updateCustodianForm('contact', event.target.value)} required />
+                      </label>
+                      <button className="primary-button" type="submit" disabled={loading === 'custodian-add'}>
+                        Agregar custodio
+                      </button>
+                    </form>
+                  </div>
+                )}
+                <button className="ghost-button danger-button standalone-link" type="button" onClick={() => void handleCloseCustodianSession()}>
+                  <X size={16} />
+                  Cerrar sesion
+                </button>
               </>
             ) : (
               <button className="primary-button" type="button" onClick={handleStartCustodianAuth} disabled={loading === 'custodian-auth-start' || !selectedCustodianId}>
                 <ShieldCheck size={18} />
-                Iniciar autenticacion
+                Iniciar sesion
               </button>
             )}
           </div>
@@ -781,12 +776,18 @@ export function Nanopaquete() {
         <section className="single-page-panel">
           <div className="panel">
             <h2>Descargar wallet</h2>
-            <p>Nautilus es un monedero para Nano. Te permite recibir, guardar y enviar tus XNO desde el celular, y lo necesitas para copiar tu direccion o abrir los pagos que genera Nanopaquete.</p>
-            <p>Instalalo antes de comprar o vender para tener lista la wallet donde recibiras o desde donde enviaras Nano.</p>
-            <a className="wallet-download-link standalone-link" href={nautilusDownloadUrl} target="_blank" rel="noreferrer">
-              <Download size={17} />
-              Abrir Nautilus
-            </a>
+            <p>Natrium y Nautilus son monederos para Nano. Te permiten recibir, guardar y enviar tus XNO desde el celular, y los necesitas para copiar tu direccion o abrir los pagos que genera Nanopaquete.</p>
+            <p>Instala uno antes de comprar o vender para tener lista la wallet donde recibiras o desde donde enviaras Nano.</p>
+            <div className="wallet-options">
+              <a className="wallet-download-link standalone-link" href={natriumDownloadUrl} target="_blank" rel="noreferrer">
+                <Download size={17} />
+                Abrir Natrium
+              </a>
+              <a className="wallet-download-link standalone-link" href={nautilusDownloadUrl} target="_blank" rel="noreferrer">
+                <Download size={17} />
+                Abrir Nautilus
+              </a>
+            </div>
           </div>
         </section>
       )}

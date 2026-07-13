@@ -67,23 +67,6 @@ button:disabled {
   opacity: 0.65;
 }
 
-.nano-logo {
-  width: 28px;
-  height: 28px;
-  display: block;
-}
-
-.nano-logo path {
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-width: 2.3;
-}
-
-.nano-logo rect {
-  fill: currentColor;
-}
-
 .primary-button,
 .offer-card button {
   background: #1f5f8f;
@@ -621,8 +604,7 @@ dd {
 }
 
 .custodian-admin-form {
-  border-top: 1px solid #d9e2ec;
-  padding-top: 14px;
+  padding-top: 0;
 }
 
 .brand-lockup {
@@ -643,6 +625,14 @@ dd {
   background: #e7f1fa;
   color: #1f5f8f;
   border: 1px solid #c3d8eb;
+  overflow: hidden;
+}
+
+.brand-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .topbar-actions {
@@ -784,6 +774,12 @@ dd {
 
 .standalone-link {
   width: fit-content;
+}
+
+.wallet-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .offers-only {
