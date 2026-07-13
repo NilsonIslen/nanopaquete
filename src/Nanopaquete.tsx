@@ -407,18 +407,18 @@ export function Nanopaquete() {
         <div className="flow-grid custodian-auth-row" aria-label="Autenticacion de custodios">
           <button className="ghost-button" type="button" onClick={handleStartCustodianAuth} disabled={loading === 'custodian-auth-start'}>
             <ShieldCheck size={18} />
-            Autenticacion de custodios
+            Acceso custodio autorizado
           </button>
           {custodianSession && <span>Custodio autenticado: {custodianSession.custodianName}</span>}
         </div>
         {custodianAuthIntent && (
           <div className="private-box custodian-auth-box">
-            <p className="eyebrow">Autenticacion de custodio</p>
-            <p>Transfiere {custodianAuthIntent.amountXno} XNO desde la wallet de custodia hacia la cuenta indicada para activar las acciones de liberacion.</p>
+            <p className="eyebrow">Custodio preautorizado</p>
+            <p>Este acceso no es publico. Solo wallets aprobadas previamente pueden operar como custodio; por ahora unicamente la wallet preestablecida puede autenticarse. Transfiere {custodianAuthIntent.amountXno} XNO desde esa misma wallet para activar las acciones de liberacion.</p>
             <div className="payment-actions">
               <button className="primary-button" type="button" onClick={() => openNanoPayment(custodianAuthIntent.paymentUri)}>
                 <Wallet size={18} />
-                Pagar autenticacion
+                Autenticar wallet
               </button>
               <button className="ghost-button" type="button" onClick={() => void copyValue(custodianAuthIntent.receiverAddress)}>
                 <Copy size={16} />
@@ -429,7 +429,7 @@ export function Nanopaquete() {
               <QRCodeSVG value={custodianAuthIntent.paymentUri} size={176} marginSize={2} />
             </div>
             <button className="primary-button" type="button" onClick={handleVerifyCustodianAuth} disabled={loading === 'custodian-auth-verify'}>
-              Verificar autenticacion
+              Verificar acceso
             </button>
           </div>
         )}

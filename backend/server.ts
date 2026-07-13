@@ -526,7 +526,9 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       sendJson(response, 200, { sessionId: session.id, expiresAt: session.expiresAt, custodianName: activeCustodian.name })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'No se pudo autenticar al custodio.'
-      sendJson(response, 422, { error: message.replace('wallet vendedora', 'wallet de custodia') })
+      sendJson(response, 422, {
+        error: message.replace('wallet vendedora', 'wallet de custodia preautorizada'),
+      })
     }
     return
   }
@@ -877,7 +879,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
 
     if (!isCustodianSessionValid(store, custodianSessionId)) {
       await writeStore(store)
-      sendJson(response, 403, { error: 'Autenticacion de custodio requerida.' })
+      sendJson(response, 403, { error: 'Autenticacion de custodio preautorizado requerida.' })
       return
     }
     const offer = store.offers.find((item) => item.id === offerId)
