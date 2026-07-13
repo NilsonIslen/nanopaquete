@@ -30,7 +30,7 @@ import './Nanopaquete.css'
 
 const currencies: Currency[] = ['COP', 'USD', 'BTC', 'EUR']
 
-type AppView = 'offers' | 'create-offer' | 'wallet' | 'custodian-auth' | 'seller-auth' | 'buyer-auth' | 'guide'
+type AppView = 'offers' | 'create-offer' | 'wallet' | 'custodian-auth' | 'guide'
 
 const nautilusDownloadUrl = 'https://nautilus.io/'
 
@@ -507,8 +507,6 @@ export function Nanopaquete() {
               <button type="button" onClick={() => { setActiveView('create-offer'); setIsMenuOpen(false) }}>Crear oferta</button>
               <button type="button" onClick={() => { setActiveView('wallet'); setIsMenuOpen(false) }}>Descargar wallet (Nautilus)</button>
               <button type="button" onClick={() => { setActiveView('custodian-auth'); setIsMenuOpen(false) }}>Autenticacion custodio</button>
-              <button type="button" onClick={() => { setActiveView('seller-auth'); setIsMenuOpen(false) }}>Autenticacion vendedor</button>
-              <button type="button" onClick={() => { setActiveView('buyer-auth'); setIsMenuOpen(false) }}>Autenticacion comprador</button>
               <button type="button" onClick={() => { setActiveView('guide'); setIsMenuOpen(false) }}>Guia</button>
               <button type="button" onClick={() => { void handleCloseAllSessions(); setIsMenuOpen(false) }}>Cerrar sesion</button>
             </div>
@@ -589,26 +587,6 @@ export function Nanopaquete() {
               <Download size={17} />
               Abrir Nautilus
             </a>
-          </div>
-        </section>
-      )}
-
-      {activeView === 'seller-auth' && (
-        <section className="single-page-panel">
-          <div className="panel">
-            <h2>Autenticacion vendedor</h2>
-            <p>Esta seccion se usara para recuperar acceso cuando el vendedor pierda el movil o cierre la sesion mientras tiene una venta abierta.</p>
-            <p>La recuperacion debe validar control de la wallet que publico la oferta antes de mostrar acciones privadas.</p>
-          </div>
-        </section>
-      )}
-
-      {activeView === 'buyer-auth' && (
-        <section className="single-page-panel">
-          <div className="panel">
-            <h2>Autenticacion comprador</h2>
-            <p>Esta seccion se usara para recuperar una negociacion tomada desde otro dispositivo sin exponer datos privados a terceros.</p>
-            <p>La recuperacion debe validar control de la wallet registrada para recibir los XNO.</p>
           </div>
         </section>
       )}
