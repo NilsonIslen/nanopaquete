@@ -502,12 +502,17 @@ export function Nanopaquete() {
                       <h3>Transferencia del custodio</h3>
                       <p>Esta oferta ya fue confirmada por el vendedor. El custodio puede usar este enlace para liberar los fondos al comprador.</p>
                       {offer.custodianReleaseUri && (
-                        <div className="payment-actions">
-                          <button className="primary-button" type="button" onClick={() => openNanoPayment(offer.custodianReleaseUri || '')}>
-                            <Wallet size={18} />
-                            Transferir al comprador
-                          </button>
-                        </div>
+                        <>
+                          <div className="payment-actions">
+                            <button className="primary-button" type="button" onClick={() => openNanoPayment(offer.custodianReleaseUri || '')}>
+                              <Wallet size={18} />
+                              Transferir al comprador
+                            </button>
+                          </div>
+                          <div className="payment-qr" aria-label="QR para transferir al comprador">
+                            <QRCodeSVG value={offer.custodianReleaseUri} size={176} marginSize={2} />
+                          </div>
+                        </>
                       )}
                     </div>
                   )}
