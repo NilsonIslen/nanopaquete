@@ -884,8 +884,6 @@ export function Nanopaquete() {
                 <dd>{sellerPayment.custodianName}</dd>
                 <dt>Wallet custodia</dt>
                 <dd>{sellerPayment.receiverAddress}</dd>
-                <dt>Sesion local</dt>
-                <dd>{clientSessionId.slice(0, 8)}</dd>
                 <dt>Vence</dt>
                 <dd>{shortDate(sellerPayment.expiresAt)}</dd>
                 <dt>Contacto custodio</dt>
