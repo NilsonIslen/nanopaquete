@@ -50,7 +50,11 @@ type OfferRecord = {
   sellerWallet?: string
   paymentHash?: string
   buyerNanoAddress?: string
+  buyerCountry?: string
+  buyerDialCode?: string
+  buyerContact?: string
   buyerSessionId?: string
+  sellerSessionId?: string
   status: OfferStatus
   createdAt: string
   takenAt?: string
@@ -64,8 +68,28 @@ type OfferRecord = {
 
 type UsedPayment = {
   hash: string
-  purpose: 'seller_deposit' | 'release_fee' | 'custodian_release'
+  purpose: 'seller_deposit' | 'release_fee' | 'custodian_release' | 'custodian_auth'
   createdAt: string
+}
+
+type CustodianAuthIntent = {
+  id: string
+  custodianId: string
+  senderWallet: string
+  receiverAddress: string
+  amountXno: string
+  paymentUri: string
+  status: 'PENDING' | 'VERIFIED' | 'EXPIRED'
+  createdAt: string
+  expiresAt: string
+  paymentHash?: string
+}
+
+type CustodianSession = {
+  id: string
+  custodianId: string
+  createdAt: string
+  expiresAt: string
 }
 
 type ReleaseFeeIntent = {
@@ -83,6 +107,8 @@ type ReleaseFeeIntent = {
 
 type Store = {
   sellerPaymentIntents: SellerPaymentIntent[]
+  custodianAuthIntents: CustodianAuthIntent[]
+  custodianSessions: CustodianSession[]
   releaseFeeIntents: ReleaseFeeIntent[]
   escrows: EscrowRecord[]
   offers: OfferRecord[]
@@ -135,8 +161,11 @@ const activeCustodian = custodians[0]
 const escrowWallet = activeCustodian.wallet
 const custodianContact = activeCustodian.contact
 const custodyFeeXno = process.env.NANOPAQUETE_CUSTODY_FEE_XNO ?? '0.1'
+const custodianAuthAmountXno = process.env.NANOPAQUETE_CUSTODIAN_AUTH_XNO ?? '0.01'
 const sellerPaymentTtlMs = Number(process.env.NANOPAQUETE_SELLER_PAYMENT_TTL_MS ?? 60 * 60 * 1000)
 const releaseFeeTtlMs = Number(process.env.NANOPAQUETE_RELEASE_FEE_TTL_MS ?? 60 * 60 * 1000)
+const custodianAuthTtlMs = Number(process.env.NANOPAQUETE_CUSTODIAN_AUTH_TTL_MS ?? 15 * 60 * 1000)
+const custodianSessionTtlMs = Number(process.env.NANOPAQUETE_CUSTODIAN_SESSION_TTL_MS ?? 12 * 60 * 60 * 1000)
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const storePath = join(__dirname, 'data', 'nanopaquete.json')
 
@@ -218,13 +247,15 @@ const readStore = async (): Promise<Store> => {
 
     return {
       sellerPaymentIntents: Array.isArray(parsed.sellerPaymentIntents) ? parsed.sellerPaymentIntents : [],
+      custodianAuthIntents: Array.isArray(parsed.custodianAuthIntents) ? parsed.custodianAuthIntents : [],
+      custodianSessions: Array.isArray(parsed.custodianSessions) ? parsed.custodianSessions : [],
       releaseFeeIntents: Array.isArray(parsed.releaseFeeIntents) ? parsed.releaseFeeIntents : [],
       escrows: Array.isArray(parsed.escrows) ? parsed.escrows : [],
       offers: Array.isArray(parsed.offers) ? parsed.offers : [],
       usedPayments: Array.isArray(parsed.usedPayments) ? parsed.usedPayments : [],
     }
   } catch {
-    return { sellerPaymentIntents: [], releaseFeeIntents: [], escrows: [], offers: [], usedPayments: [] }
+    return { sellerPaymentIntents: [], custodianAuthIntents: [], custodianSessions: [], releaseFeeIntents: [], escrows: [], offers: [], usedPayments: [] }
   }
 }
 
@@ -247,19 +278,40 @@ const createCode = (digits: number) => {
 const createNanoPaymentUri = (receiver: string, amountXno?: string) =>
   amountXno ? `nano:${receiver}?amount=${nanoToRaw(amountXno)}` : `nano:${receiver}`
 
-const publicOffer = (offer: OfferRecord) => ({
-  id: offer.id,
-  amountXno: offer.amountXno,
-  currency: offer.currency,
-  price: offer.price,
-  status: offer.status,
-  createdAt: offer.createdAt,
-  ...(offer.status === 'RELEASING' && offer.buyerNanoAddress
-    ? {
-        custodianReleaseUri: createNanoPaymentUri(offer.buyerNanoAddress, offer.amountXno),
-      }
-    : {}),
-})
+const isCustodianSessionValid = (store: Store, sessionId: string) => {
+  const normalized = normalizeClientSessionId(sessionId)
+  if (!normalized) return false
+  const now = Date.now()
+  store.custodianSessions = store.custodianSessions.filter((session) => new Date(session.expiresAt).getTime() > now)
+  return store.custodianSessions.some((session) => session.id === normalized && session.custodianId === activeCustodian.id)
+}
+
+const publicOffer = (offer: OfferRecord, context: { clientSessionId?: string; isCustodian?: boolean } = {}) => {
+  const isSeller = Boolean(context.clientSessionId && offer.sellerSessionId && offer.sellerSessionId === context.clientSessionId)
+  const isCustodian = Boolean(context.isCustodian)
+
+  return {
+    id: offer.id,
+    amountXno: offer.amountXno,
+    currency: offer.currency,
+    price: offer.price,
+    status: offer.status,
+    createdAt: offer.createdAt,
+    canConfirmPayment: isSeller && offer.status === 'NEGOTIATION',
+    ...(isSeller && offer.status === 'NEGOTIATION' && offer.buyerContact
+      ? {
+          buyerCountry: offer.buyerCountry,
+          buyerDialCode: offer.buyerDialCode,
+          buyerContact: offer.buyerContact,
+        }
+      : {}),
+    ...(isCustodian && offer.status === 'RELEASING' && offer.buyerNanoAddress
+      ? {
+          custodianReleaseUri: createNanoPaymentUri(offer.buyerNanoAddress, offer.amountXno),
+        }
+      : {}),
+  }
+}
 
 const takenOfferResponse = (offer: OfferRecord) => ({
   offer: publicOffer(offer),
@@ -337,6 +389,10 @@ const renderAdmin = (offers: OfferRecord[]) => `<!doctype html>
               <dt>Wallet vendedor</dt><dd>${escapeHtml(offer.sellerWallet)}</dd>
               <dt>Hash deposito</dt><dd>${escapeHtml(offer.paymentHash)}</dd>
               <dt>Wallet comprador</dt><dd>${escapeHtml(offer.buyerNanoAddress)}</dd>
+              <dt>Pais comprador</dt><dd>${escapeHtml(offer.buyerCountry)}</dd>
+              <dt>Extension comprador</dt><dd>${escapeHtml(offer.buyerDialCode)}</dd>
+              <dt>Contacto comprador</dt><dd>${escapeHtml(offer.buyerContact)}</dd>
+              <dt>Sesion vendedor</dt><dd>${escapeHtml(offer.sellerSessionId)}</dd>
               <dt>Sesion comprador</dt><dd>${escapeHtml(offer.buyerSessionId)}</dd>
               <dt>Hash comision liberacion</dt><dd>${escapeHtml(offer.releaseFeeHash)}</dd>
               <dt>Creada</dt><dd>${escapeHtml(offer.createdAt)}</dd>
@@ -368,11 +424,15 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
   }
 
   if (request.method === 'GET' && url.pathname === '/api/offers') {
+    const clientSessionId = normalizeClientSessionId(url.searchParams.get('clientSessionId'))
+    const custodianSessionId = normalizeClientSessionId(url.searchParams.get('custodianSessionId'))
     const store = await readStore()
+    const isCustodian = isCustodianSessionValid(store, custodianSessionId)
+    if (custodianSessionId) await writeStore(store)
     sendJson(response, 200, {
       offers: store.offers
         .filter((offer) => ['ACTIVE', 'NEGOTIATION', 'RELEASING'].includes(offer.status))
-        .map(publicOffer),
+        .map((offer) => publicOffer(offer, { clientSessionId, isCustodian })),
     })
     return
   }
@@ -386,6 +446,88 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     )
 
     sendJson(response, 200, { negotiation: offer ? takenOfferResponse(offer) : null })
+    return
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/custodian-auth') {
+    const store = await readStore()
+    const now = Date.now()
+    store.custodianAuthIntents = store.custodianAuthIntents.filter(
+      (intent) => intent.status !== 'PENDING' || new Date(intent.expiresAt).getTime() > now,
+    )
+
+    const existing = store.custodianAuthIntents.find(
+      (intent) => intent.custodianId === activeCustodian.id && intent.status === 'PENDING',
+    )
+
+    if (existing) {
+      sendJson(response, 200, existing)
+      return
+    }
+
+    const intent: CustodianAuthIntent = {
+      id: `cua_${randomUUID().replaceAll('-', '').slice(0, 18)}`,
+      custodianId: activeCustodian.id,
+      senderWallet: escrowWallet,
+      receiverAddress: escrowWallet,
+      amountXno: custodianAuthAmountXno,
+      paymentUri: createNanoPaymentUri(escrowWallet, custodianAuthAmountXno),
+      status: 'PENDING',
+      createdAt: new Date(now).toISOString(),
+      expiresAt: new Date(now + custodianAuthTtlMs).toISOString(),
+    }
+
+    store.custodianAuthIntents.push(intent)
+    await writeStore(store)
+    sendJson(response, 201, intent)
+    return
+  }
+
+  const verifyCustodianAuthMatch = url.pathname.match(/^\/api\/custodian-auth\/([^/]+)\/verify$/)
+
+  if (request.method === 'POST' && verifyCustodianAuthMatch) {
+    const intentId = decodeURIComponent(verifyCustodianAuthMatch[1])
+    const store = await readStore()
+    const intent = store.custodianAuthIntents.find((item) => item.id === intentId)
+
+    if (!intent) {
+      sendJson(response, 404, { error: 'Autenticacion de custodio no encontrada.' })
+      return
+    }
+
+    if (new Date(intent.expiresAt).getTime() <= Date.now()) {
+      intent.status = 'EXPIRED'
+      await writeStore(store)
+      sendJson(response, 410, { error: 'La autenticacion vencio. Inicia una nueva.' })
+      return
+    }
+
+    try {
+      const payment = await findIncomingPaymentBySenderAmount({
+        receiverWallet: intent.receiverAddress,
+        senderWallet: intent.senderWallet,
+        amountNano: intent.amountXno,
+        createdAfter: intent.createdAt,
+        excludedHashes: store.usedPayments.map((item) => item.hash),
+      })
+
+      const session: CustodianSession = {
+        id: `cus_${randomUUID().replaceAll('-', '').slice(0, 24)}`,
+        custodianId: intent.custodianId,
+        createdAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + custodianSessionTtlMs).toISOString(),
+      }
+
+      intent.status = 'VERIFIED'
+      intent.paymentHash = payment.hash
+      store.custodianSessions.push(session)
+      store.usedPayments.push({ hash: payment.hash, purpose: 'custodian_auth', createdAt: new Date().toISOString() })
+      await writeStore(store)
+      sendJson(response, 200, { sessionId: session.id, expiresAt: session.expiresAt, custodianName: activeCustodian.name })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo autenticar al custodio.'
+      sendJson(response, 422, { error: message.replace('wallet vendedora', 'wallet de custodia') })
+    }
     return
   }
 
@@ -556,6 +698,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       sellerContact,
       sellerPrivateCode: createCode(8),
       sellerWallet: escrow.sellerWallet,
+      sellerSessionId: escrow.clientSessionId,
       paymentHash: escrow.paymentHash,
       status: 'ACTIVE',
       createdAt: new Date().toISOString(),
@@ -575,10 +718,18 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     const offerId = decodeURIComponent(takeMatch[1])
     const body = await readJsonBody(request)
     const buyerNanoAddress = normalizeText(body.buyerNanoAddress)
+    const buyerCountry = normalizeText(body.buyerCountry)
+    const buyerDialCode = normalizeText(body.buyerDialCode)
+    const buyerContact = normalizeText(body.buyerContact)
     const clientSessionId = normalizeClientSessionId(body.clientSessionId)
 
     if (!isNanoAddress(buyerNanoAddress)) {
       sendJson(response, 400, { error: 'Ingresa una cuenta nano valida para recibir los XNO.' })
+      return
+    }
+
+    if (!buyerCountry || !buyerDialCode || buyerContact.length < 6) {
+      sendJson(response, 400, { error: 'Ingresa pais, extension y contacto valido del comprador.' })
       return
     }
 
@@ -607,6 +758,9 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
 
     offer.status = 'NEGOTIATION'
     offer.buyerNanoAddress = buyerNanoAddress
+    offer.buyerCountry = buyerCountry
+    offer.buyerDialCode = buyerDialCode
+    offer.buyerContact = buyerContact
     offer.buyerSessionId = clientSessionId || undefined
     offer.takenAt = new Date().toISOString()
     await writeStore(store)
@@ -641,6 +795,9 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
 
     offer.status = 'ACTIVE'
     offer.buyerNanoAddress = undefined
+    offer.buyerCountry = undefined
+    offer.buyerDialCode = undefined
+    offer.buyerContact = undefined
     offer.buyerSessionId = undefined
     offer.takenAt = undefined
     await writeStore(store)
@@ -653,6 +810,8 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
 
   if (request.method === 'POST' && releaseIntentMatch) {
     const offerId = decodeURIComponent(releaseIntentMatch[1])
+    const body = await readJsonBody(request)
+    const clientSessionId = normalizeClientSessionId(body.clientSessionId)
     const store = await readStore()
     const offer = store.offers.find((item) => item.id === offerId)
 
@@ -662,7 +821,12 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     }
 
     if (offer.status !== 'NEGOTIATION') {
-      sendJson(response, 409, { error: 'Solo se puede liberar una oferta en negociacion.' })
+      sendJson(response, 409, { error: 'Solo se puede confirmar una oferta en negociacion.' })
+      return
+    }
+
+    if (!offer.sellerSessionId || offer.sellerSessionId !== clientSessionId) {
+      sendJson(response, 403, { error: 'Solo la sesion vendedora que publico la oferta puede confirmar el pago.' })
       return
     }
 
@@ -707,7 +871,15 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
 
   if (request.method === 'POST' && verifyCustodianReleaseMatch) {
     const offerId = decodeURIComponent(verifyCustodianReleaseMatch[1])
+    const body = await readJsonBody(request)
+    const custodianSessionId = normalizeClientSessionId(body.custodianSessionId)
     const store = await readStore()
+
+    if (!isCustodianSessionValid(store, custodianSessionId)) {
+      await writeStore(store)
+      sendJson(response, 403, { error: 'Autenticacion de custodio requerida.' })
+      return
+    }
     const offer = store.offers.find((item) => item.id === offerId)
 
     if (!offer) {
@@ -716,7 +888,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     }
 
     if (offer.status === 'RELEASED') {
-      sendJson(response, 200, { offer: publicOffer(offer), paymentHash: offer.custodianReleaseHash })
+      sendJson(response, 200, { offer: publicOffer(offer, { isCustodian: true }), paymentHash: offer.custodianReleaseHash })
       return
     }
 
@@ -744,7 +916,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       offer.closedAt = new Date().toISOString()
       store.usedPayments.push({ hash: payment.hash, purpose: 'custodian_release', createdAt: new Date().toISOString() })
       await writeStore(store)
-      sendJson(response, 200, { offer: publicOffer(offer), paymentHash: payment.hash })
+      sendJson(response, 200, { offer: publicOffer(offer, { isCustodian: true }), paymentHash: payment.hash })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'No se pudo validar la liberacion del custodio.'
       sendJson(response, 422, {
@@ -758,6 +930,8 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
 
   if (request.method === 'POST' && verifyReleaseIntentMatch) {
     const intentId = decodeURIComponent(verifyReleaseIntentMatch[1])
+    const body = await readJsonBody(request)
+    const clientSessionId = normalizeClientSessionId(body.clientSessionId)
     const store = await readStore()
     const intent = store.releaseFeeIntents.find((item) => item.id === intentId)
 
@@ -774,12 +948,17 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     }
 
     if (offer.status === 'RELEASING') {
-      sendJson(response, 200, { offer: publicOffer(offer), paymentHash: offer.releaseFeeHash })
+      sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId }), paymentHash: offer.releaseFeeHash })
       return
     }
 
     if (offer.status !== 'NEGOTIATION') {
       sendJson(response, 409, { error: 'Esta oferta ya no esta en negociacion.' })
+      return
+    }
+
+    if (!offer.sellerSessionId || offer.sellerSessionId !== clientSessionId) {
+      sendJson(response, 403, { error: 'Solo la sesion vendedora que publico la oferta puede confirmar el pago.' })
       return
     }
 
@@ -806,7 +985,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       offer.releaseRequestedAt = new Date().toISOString()
       store.usedPayments.push({ hash: payment.hash, purpose: 'release_fee', createdAt: new Date().toISOString() })
       await writeStore(store)
-      sendJson(response, 200, { offer: publicOffer(offer), paymentHash: payment.hash })
+      sendJson(response, 200, { offer: publicOffer(offer, { isCustodian: true }), paymentHash: payment.hash })
     } catch (error) {
       sendJson(response, 422, {
         error: error instanceof Error ? error.message : 'No se pudo validar la comision de liberacion.',

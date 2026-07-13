@@ -13,6 +13,10 @@ export type PublicOffer = {
   price: string
   status: OfferStatus
   createdAt: string
+  canConfirmPayment?: boolean
+  buyerCountry?: string
+  buyerDialCode?: string
+  buyerContact?: string
   custodianReleaseUri?: string
 }
 
@@ -54,6 +58,9 @@ export type PublishedOffer = {
 
 export type TakeOfferPayload = {
   buyerNanoAddress: string
+  buyerCountry: string
+  buyerDialCode: string
+  buyerContact: string
   clientSessionId: string
 }
 
@@ -62,6 +69,24 @@ export type TakenOffer = {
   sellerContact: string
   sellerCountry?: string
   sellerDialCode?: string
+}
+
+export type CustodianAuthIntent = {
+  id: string
+  custodianId: string
+  senderWallet: string
+  receiverAddress: string
+  amountXno: string
+  paymentUri: string
+  status: 'PENDING' | 'VERIFIED' | 'EXPIRED'
+  createdAt: string
+  expiresAt: string
+}
+
+export type CustodianSession = {
+  sessionId: string
+  expiresAt: string
+  custodianName: string
 }
 
 export type ReleaseFeeIntent = {
@@ -100,7 +125,11 @@ async function requestJson<T>(path: string, options?: RequestInit): Promise<T> {
   return data as T
 }
 
-export const getOffers = () => requestJson<{ offers: PublicOffer[] }>('/offers')
+export const getOffers = (clientSessionId: string, custodianSessionId?: string) => {
+  const params = new URLSearchParams({ clientSessionId })
+  if (custodianSessionId) params.set('custodianSessionId', custodianSessionId)
+  return requestJson<{ offers: PublicOffer[] }>(`/offers?${params.toString()}`)
+}
 
 export const getBuyerNegotiation = (clientSessionId: string) =>
   requestJson<{ negotiation: TakenOffer | null }>(
@@ -137,20 +166,32 @@ export const cancelTakenOffer = (offerId: string, clientSessionId: string) =>
     body: JSON.stringify({ clientSessionId }),
   })
 
-export const startReleaseFee = (offerId: string) =>
+export const startReleaseFee = (offerId: string, clientSessionId: string) =>
   requestJson<ReleaseFeeIntent>(`/offers/${encodeURIComponent(offerId)}/release-intents`, {
     method: 'POST',
-    body: JSON.stringify({}),
+    body: JSON.stringify({ clientSessionId }),
   })
 
-export const verifyReleaseFee = (intentId: string) =>
+export const verifyReleaseFee = (intentId: string, clientSessionId: string) =>
   requestJson<{ offer: PublicOffer; paymentHash?: string }>(`/release-intents/${encodeURIComponent(intentId)}/verify`, {
     method: 'POST',
+    body: JSON.stringify({ clientSessionId }),
+  })
+
+export const startCustodianAuth = () =>
+  requestJson<CustodianAuthIntent>('/custodian-auth', {
+    method: 'POST',
     body: JSON.stringify({}),
   })
 
-export const verifyCustodianRelease = (offerId: string) =>
-  requestJson<{ offer: PublicOffer; paymentHash?: string }>(`/offers/${encodeURIComponent(offerId)}/verify-custodian-release`, {
+export const verifyCustodianAuth = (intentId: string) =>
+  requestJson<CustodianSession>(`/custodian-auth/${encodeURIComponent(intentId)}/verify`, {
     method: 'POST',
     body: JSON.stringify({}),
+  })
+
+export const verifyCustodianRelease = (offerId: string, custodianSessionId: string) =>
+  requestJson<{ offer: PublicOffer; paymentHash?: string }>(`/offers/${encodeURIComponent(offerId)}/verify-custodian-release`, {
+    method: 'POST',
+    body: JSON.stringify({ custodianSessionId }),
   })

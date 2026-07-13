@@ -1,18 +1,22 @@
 import { useEffect, useState } from 'react'
-import { ArrowRight, CheckCircle2, Copy, RefreshCw, ShieldCheck, Wallet, X } from 'lucide-react'
+import { CheckCircle2, Copy, RefreshCw, ShieldCheck, Wallet, X } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import {
   cancelTakenOffer,
   getBuyerNegotiation,
   getOffers,
   publishOffer,
+  startCustodianAuth,
   startReleaseFee,
   startSellerPayment,
   takeOffer,
+  verifyCustodianAuth,
   verifyCustodianRelease,
   verifyReleaseFee,
   verifySellerPayment,
   type Currency,
+  type CustodianAuthIntent,
+  type CustodianSession,
   type EscrowSession,
   type PublicOffer,
   type PublishedOffer,
@@ -44,8 +48,16 @@ const initialSellerForm = {
   sellerContact: '',
 }
 
+const initialBuyerForm = {
+  nanoAddress: '',
+  country: 'Colombia',
+  dialCode: '+57',
+  contact: '',
+}
+
 const sellerPaymentStorageKey = 'nanopaquete:seller-payment'
 const takenOfferStorageKey = 'nanopaquete:taken-offer'
+const custodianSessionStorageKey = 'nanopaquete:custodian-session'
 const clientSessionStorageKey = 'nanopaquete:client-session'
 
 const createClientSessionId = () =>
@@ -78,6 +90,16 @@ const getStoredTakenOffer = () => {
   }
 }
 
+const getStoredCustodianSession = () => {
+  try {
+    const value = window.localStorage.getItem(custodianSessionStorageKey)
+    const session = value ? (JSON.parse(value) as CustodianSession) : null
+    return session && new Date(session.expiresAt).getTime() > Date.now() ? session : null
+  } catch {
+    return null
+  }
+}
+
 const shortDate = (value: string) =>
   new Intl.DateTimeFormat('es-CO', {
     dateStyle: 'medium',
@@ -95,8 +117,10 @@ export function Nanopaquete() {
   const [publishedOffer, setPublishedOffer] = useState<PublishedOffer | null>(null)
   const [offers, setOffers] = useState<PublicOffer[]>([])
   const [selectedOffer, setSelectedOffer] = useState<PublicOffer | null>(null)
-  const [buyerNanoAddress, setBuyerNanoAddress] = useState('')
+  const [buyerForm, setBuyerForm] = useState(initialBuyerForm)
   const [takenOffer, setTakenOffer] = useState<TakenOffer | null>(getStoredTakenOffer)
+  const [custodianAuthIntent, setCustodianAuthIntent] = useState<CustodianAuthIntent | null>(null)
+  const [custodianSession, setCustodianSession] = useState<CustodianSession | null>(getStoredCustodianSession)
   const [releaseFeeIntent, setReleaseFeeIntent] = useState<ReleaseFeeIntent | null>(null)
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -108,7 +132,7 @@ export function Nanopaquete() {
     setLoading('offers')
 
     try {
-      const response = await getOffers()
+      const response = await getOffers(clientSessionId, custodianSession?.sessionId)
       setOffers(response.offers)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'No se pudieron cargar las ofertas.')
@@ -120,7 +144,7 @@ export function Nanopaquete() {
   useEffect(() => {
     let ignore = false
 
-    Promise.all([getOffers(), getBuyerNegotiation(clientSessionId)])
+    Promise.all([getOffers(clientSessionId, custodianSession?.sessionId), getBuyerNegotiation(clientSessionId)])
       .then(([offersResponse, negotiationResponse]) => {
         if (ignore) return
         setOffers(offersResponse.offers)
@@ -135,7 +159,7 @@ export function Nanopaquete() {
     return () => {
       ignore = true
     }
-  }, [clientSessionId])
+  }, [clientSessionId, custodianSession?.sessionId])
 
   useEffect(() => {
     if (sellerPayment) {
@@ -155,8 +179,21 @@ export function Nanopaquete() {
     window.localStorage.removeItem(takenOfferStorageKey)
   }, [takenOffer])
 
+  useEffect(() => {
+    if (custodianSession) {
+      window.localStorage.setItem(custodianSessionStorageKey, JSON.stringify(custodianSession))
+      return
+    }
+
+    window.localStorage.removeItem(custodianSessionStorageKey)
+  }, [custodianSession])
+
   const updateSellerForm = (field: keyof typeof sellerForm, value: string) => {
     setSellerForm((current) => ({ ...current, [field]: value }))
+  }
+
+  const updateBuyerForm = (field: keyof typeof buyerForm, value: string) => {
+    setBuyerForm((current) => ({ ...current, [field]: value }))
   }
 
   const handleStartSellerPayment = async () => {
@@ -234,10 +271,16 @@ export function Nanopaquete() {
     setLoading('take')
 
     try {
-      const response = await takeOffer(selectedOffer.id, { buyerNanoAddress, clientSessionId })
+      const response = await takeOffer(selectedOffer.id, {
+        buyerNanoAddress: buyerForm.nanoAddress,
+        buyerCountry: buyerForm.country,
+        buyerDialCode: buyerForm.dialCode,
+        buyerContact: buyerForm.contact,
+        clientSessionId,
+      })
       setTakenOffer(response)
       setSelectedOffer(null)
-      setBuyerNanoAddress('')
+      setBuyerForm(initialBuyerForm)
       await loadOffers()
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'No se pudo tomar la oferta.')
@@ -251,7 +294,7 @@ export function Nanopaquete() {
     setLoading(`release-start:${offerId}`)
 
     try {
-      const intent = await startReleaseFee(offerId)
+      const intent = await startReleaseFee(offerId, clientSessionId)
       setReleaseFeeIntent(intent)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'No se pudo iniciar la liberacion.')
@@ -266,7 +309,7 @@ export function Nanopaquete() {
     setLoading('release-verify')
 
     try {
-      await verifyReleaseFee(releaseFeeIntent.id)
+      await verifyReleaseFee(releaseFeeIntent.id, clientSessionId)
       setReleaseFeeIntent(null)
       await loadOffers()
     } catch (requestError) {
@@ -281,12 +324,47 @@ export function Nanopaquete() {
     setLoading(`custodian-release:${offerId}`)
 
     try {
-      await verifyCustodianRelease(offerId)
+      if (!custodianSession) {
+        setError('Autenticacion de custodio requerida.')
+        return
+      }
+      await verifyCustodianRelease(offerId, custodianSession.sessionId)
       if (takenOffer?.offer.id === offerId) setTakenOffer(null)
       setOffers((currentOffers) => currentOffers.filter((offer) => offer.id !== offerId))
       await loadOffers()
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'No se pudo validar la transferencia del custodio.')
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  const handleStartCustodianAuth = async () => {
+    setError(null)
+    setLoading('custodian-auth-start')
+
+    try {
+      const intent = await startCustodianAuth()
+      setCustodianAuthIntent(intent)
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'No se pudo iniciar la autenticacion de custodio.')
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  const handleVerifyCustodianAuth = async () => {
+    if (!custodianAuthIntent) return
+    setError(null)
+    setLoading('custodian-auth-verify')
+
+    try {
+      const session = await verifyCustodianAuth(custodianAuthIntent.id)
+      setCustodianSession(session)
+      setCustodianAuthIntent(null)
+      await loadOffers()
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'No se pudo validar la autenticacion de custodio.')
     } finally {
       setLoading(null)
     }
@@ -326,13 +404,35 @@ export function Nanopaquete() {
       </header>
 
       <section className="intro-band compact-intro-band">
-        <div className="flow-grid" aria-label="Flujo principal">
-          <span><ShieldCheck size={18} /> Deposito</span>
-          <ArrowRight size={18} />
-          <span><CheckCircle2 size={18} /> Publicacion</span>
-          <ArrowRight size={18} />
-          <span>0.1 XNO comision</span>
+        <div className="flow-grid custodian-auth-row" aria-label="Autenticacion de custodios">
+          <button className="ghost-button" type="button" onClick={handleStartCustodianAuth} disabled={loading === 'custodian-auth-start'}>
+            <ShieldCheck size={18} />
+            Autenticacion de custodios
+          </button>
+          {custodianSession && <span>Custodio autenticado: {custodianSession.custodianName}</span>}
         </div>
+        {custodianAuthIntent && (
+          <div className="private-box custodian-auth-box">
+            <p className="eyebrow">Autenticacion de custodio</p>
+            <p>Transfiere {custodianAuthIntent.amountXno} XNO desde la wallet de custodia hacia la cuenta indicada para activar las acciones de liberacion.</p>
+            <div className="payment-actions">
+              <button className="primary-button" type="button" onClick={() => openNanoPayment(custodianAuthIntent.paymentUri)}>
+                <Wallet size={18} />
+                Pagar autenticacion
+              </button>
+              <button className="ghost-button" type="button" onClick={() => void copyValue(custodianAuthIntent.receiverAddress)}>
+                <Copy size={16} />
+                Copiar wallet
+              </button>
+            </div>
+            <div className="payment-qr" aria-label="QR de autenticacion de custodio">
+              <QRCodeSVG value={custodianAuthIntent.paymentUri} size={176} marginSize={2} />
+            </div>
+            <button className="primary-button" type="button" onClick={handleVerifyCustodianAuth} disabled={loading === 'custodian-auth-verify'}>
+              Verificar autenticacion
+            </button>
+          </div>
+        )}
       </section>
 
       {error && <div className="status-message error">{error}</div>}
@@ -346,7 +446,7 @@ export function Nanopaquete() {
           {!sellerPayment && !escrowSession && (
             <div className="deposit-start">
               <p>
-                Inicia el deposito y transfiere a la cuenta de custodia la cantidad exacta de XNO que quieres vender.
+                Transfiere a la cuenta de custodia la cantidad exacta de XNO que quieres vender.
               </p>
               <button className="primary-button" type="button" onClick={handleStartSellerPayment} disabled={loading === 'start-payment'}>
                 <Wallet size={18} />
@@ -504,23 +604,35 @@ export function Nanopaquete() {
                     <small>Estado: {offer.status === 'ACTIVE' ? 'Activa' : offer.status === 'NEGOTIATION' ? 'En negociacion' : 'Liberando'}</small>
                     <small>Publicada {shortDate(offer.createdAt)}</small>
                   </div>
-                  {offer.status === 'NEGOTIATION' && (
+                  {offer.canConfirmPayment && (
                     <button
                       type="button"
                       onClick={() => void handleStartReleaseFee(offer.id)}
                       disabled={loading === `release-start:${offer.id}`}
                     >
-                      Liberar fondos
+                      Confirmar pago
                     </button>
                   )}
-                  {offer.status === 'RELEASING' && (
+                  {offer.canConfirmPayment && offer.buyerContact && (
+                    <div className="private-box seller-buyer-box">
+                      <p className="eyebrow">Comprador de esta oferta</p>
+                      <dl>
+                        <dt>Pais comprador</dt>
+                        <dd>{offer.buyerCountry || 'No informado'}</dd>
+                        <dt>Contacto comprador</dt>
+                        <dd>{offer.buyerDialCode ? offer.buyerDialCode + ' ' : ''}{offer.buyerContact}</dd>
+                      </dl>
+                    </div>
+                  )}
+                  {offer.status === 'RELEASING' && !offer.custodianReleaseUri && (
+                    <span className="offer-status-pill">Liberando</span>
+                  )}
+                  {offer.status === 'RELEASING' && offer.custodianReleaseUri && (
                     <div className="private-box custodian-release-box">
                       <span className="offer-status-pill">Liberando</span>
                       <h3>Transferencia del custodio</h3>
                       <p>Esta oferta ya fue confirmada por el vendedor. El custodio puede usar este enlace para liberar los fondos al comprador.</p>
-                      {offer.custodianReleaseUri && (
-                        <>
-                          <div className="payment-actions">
+                      <div className="payment-actions">
                             <button className="primary-button" type="button" onClick={() => openNanoPayment(offer.custodianReleaseUri || '')}>
                               <Wallet size={18} />
                               Transferir al comprador
@@ -534,12 +646,10 @@ export function Nanopaquete() {
                               <CheckCircle2 size={16} />
                               {loading === `custodian-release:${offer.id}` ? 'Verificando...' : 'Verificar liberacion'}
                             </button>
-                          </div>
-                          <div className="payment-qr" aria-label="QR para transferir al comprador">
-                            <QRCodeSVG value={offer.custodianReleaseUri} size={176} marginSize={2} />
-                          </div>
-                        </>
-                      )}
+                      </div>
+                      <div className="payment-qr" aria-label="QR para transferir al comprador">
+                        <QRCodeSVG value={offer.custodianReleaseUri} size={176} marginSize={2} />
+                      </div>
                     </div>
                   )}
                   {!isSelected && offer.status === 'ACTIVE' && (
@@ -558,7 +668,7 @@ export function Nanopaquete() {
                   )}
                   {releaseFeeIntent?.offerId === offer.id && (
                     <div className="private-box release-fee-box inline-release-fee-box">
-                      <p className="eyebrow">Liberar fondos</p>
+                      <p className="eyebrow">Confirmar pago recibido</p>
                       <h3>Paga {releaseFeeIntent.amountXno} XNO desde la wallet vendedora a la custodia.</h3>
                       <p>Cuando la app detecte esa transferencia, la oferta pasara a estado liberando y el custodio podra enviar los fondos a la wallet registrada por el comprador.</p>
                       <div className="payment-actions">
@@ -601,10 +711,43 @@ export function Nanopaquete() {
                         Wallet nano donde recibiras los XNO
                         <input
                           placeholder="nano_..."
-                          value={buyerNanoAddress}
-                          onChange={(event) => setBuyerNanoAddress(event.target.value)}
+                          value={buyerForm.nanoAddress}
+                          onChange={(event) => updateBuyerForm('nanoAddress', event.target.value)}
                           required
                           autoFocus
+                        />
+                      </label>
+                      <label>
+                        Pais del contacto
+                        <select
+                          value={buyerForm.country}
+                          onChange={(event) => {
+                            const selected = contactCountries.find((item) => item.country === event.target.value)
+                            updateBuyerForm('country', event.target.value)
+                            updateBuyerForm('dialCode', selected?.dialCode ?? '')
+                          }}
+                        >
+                          {contactCountries.map((item) => (
+                            <option key={item.country} value={item.country}>{item.country}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        Extension internacional
+                        <input
+                          placeholder="+57"
+                          value={buyerForm.dialCode}
+                          onChange={(event) => updateBuyerForm('dialCode', event.target.value)}
+                          required
+                        />
+                      </label>
+                      <label>
+                        Contacto privado
+                        <input
+                          placeholder="3008188284 o @usuario Telegram"
+                          value={buyerForm.contact}
+                          onChange={(event) => updateBuyerForm('contact', event.target.value)}
+                          required
                         />
                       </label>
                       <div className="button-row">

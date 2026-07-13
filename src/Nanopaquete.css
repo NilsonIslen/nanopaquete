@@ -516,3 +516,36 @@ dd {
   color: #3f4f42;
   line-height: 1.5;
 }
+
+.custodian-auth-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.custodian-auth-row > button {
+  width: fit-content;
+}
+
+.custodian-auth-row > span {
+  min-height: 42px;
+  background: #edf8ee;
+  border-color: #bee4c6;
+  color: #1d562f;
+}
+
+.custodian-auth-box {
+  max-width: 720px;
+}
+
+.custodian-auth-box > p:not(.eyebrow),
+.seller-buyer-box > p:not(.eyebrow) {
+  color: #3f4f42;
+  line-height: 1.5;
+}
+
+.seller-buyer-box {
+  grid-column: 1 / -1;
+  border-color: #b9cfe9;
+  background: #f1f6fc;
+}
