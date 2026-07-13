@@ -4,6 +4,7 @@ import { QRCodeSVG } from 'qrcode.react'
 import {
   cancelTakenOffer,
   getBuyerNegotiation,
+  getCustodians,
   getOffers,
   publishOffer,
   startCustodianAuth,
@@ -16,6 +17,7 @@ import {
   verifySellerPayment,
   type Currency,
   type CustodianAuthIntent,
+  type CustodianOption,
   type CustodianSession,
   type EscrowSession,
   type PublicOffer,
@@ -116,6 +118,8 @@ export function Nanopaquete() {
   const [escrowSession, setEscrowSession] = useState<EscrowSession | null>(null)
   const [publishedOffer, setPublishedOffer] = useState<PublishedOffer | null>(null)
   const [offers, setOffers] = useState<PublicOffer[]>([])
+  const [custodians, setCustodians] = useState<CustodianOption[]>([])
+  const [selectedCustodianId, setSelectedCustodianId] = useState('')
   const [selectedOffer, setSelectedOffer] = useState<PublicOffer | null>(null)
   const [buyerForm, setBuyerForm] = useState(initialBuyerForm)
   const [takenOffer, setTakenOffer] = useState<TakenOffer | null>(getStoredTakenOffer)
@@ -140,6 +144,26 @@ export function Nanopaquete() {
       setLoading(null)
     }
   }
+
+  useEffect(() => {
+    let ignore = false
+
+    getCustodians()
+      .then((response) => {
+        if (ignore) return
+        setCustodians(response.custodians)
+        setSelectedCustodianId((current) => current || response.custodians[0]?.id || '')
+      })
+      .catch((requestError) => {
+        if (!ignore) {
+          setError(requestError instanceof Error ? requestError.message : 'No se pudieron cargar los custodios.')
+        }
+      })
+
+    return () => {
+      ignore = true
+    }
+  }, [])
 
   useEffect(() => {
     let ignore = false
@@ -203,7 +227,7 @@ export function Nanopaquete() {
     setLoading('start-payment')
 
     try {
-      const intent = await startSellerPayment(clientSessionId)
+      const intent = await startSellerPayment(clientSessionId, selectedCustodianId)
       setSellerPayment(intent)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'No se pudo iniciar el deposito.')
@@ -211,6 +235,8 @@ export function Nanopaquete() {
       setLoading(null)
     }
   }
+
+  const selectedCustodian = custodians.find((custodian) => custodian.id === selectedCustodianId)
 
   const handleCancelSellerPayment = () => {
     setSellerPayment(null)
@@ -344,7 +370,7 @@ export function Nanopaquete() {
     setLoading('custodian-auth-start')
 
     try {
-      const intent = await startCustodianAuth()
+      const intent = await startCustodianAuth(selectedCustodianId)
       setCustodianAuthIntent(intent)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'No se pudo iniciar la autenticacion de custodio.')
@@ -469,10 +495,23 @@ export function Nanopaquete() {
 
           {!sellerPayment && !escrowSession && (
             <div className="deposit-start">
+              <label>
+                Custodio
+                <select
+                  value={selectedCustodianId}
+                  onChange={(event) => setSelectedCustodianId(event.target.value)}
+                  disabled={!custodians.length}
+                >
+                  {custodians.map((custodian) => (
+                    <option key={custodian.id} value={custodian.id}>{custodian.name}</option>
+                  ))}
+                </select>
+              </label>
+              {selectedCustodian && <p>Contacto custodio: {selectedCustodian.contact}</p>}
               <p>
                 Transfiere a la cuenta de custodia la cantidad exacta de XNO que quieres vender.
               </p>
-              <button className="primary-button" type="button" onClick={handleStartSellerPayment} disabled={loading === 'start-payment'}>
+              <button className="primary-button" type="button" onClick={handleStartSellerPayment} disabled={loading === 'start-payment' || !selectedCustodianId}>
                 <Wallet size={18} />
                 Iniciar deposito
               </button>

@@ -14,6 +14,7 @@ type OfferStatus = 'ACTIVE' | 'NEGOTIATION' | 'RELEASING' | 'RELEASED' | 'CANCEL
 type SellerPaymentIntent = {
   id: string
   receiverAddress: string
+  custodianId: string
   status: 'PENDING' | 'VERIFIED' | 'EXPIRED'
   clientIp: string
   clientSessionId?: string
@@ -31,6 +32,7 @@ type EscrowRecord = {
   paymentHash: string
   amountXno: string
   sellerWallet: string
+  custodianId: string
   status: 'PENDING' | 'PUBLISHED'
   clientIp: string
   clientSessionId?: string
@@ -44,6 +46,7 @@ type OfferRecord = {
   currency: Currency
   price: string
   sellerContact: string
+  custodianId: string
   sellerCountry?: string
   sellerDialCode?: string
   sellerPrivateCode: string
@@ -159,8 +162,9 @@ const getConfiguredCustodians = () => {
 const custodians = getConfiguredCustodians()
 const authorizedCustodianWallets = new Set(custodians.map((custodian) => custodian.wallet))
 const activeCustodian = custodians[0]
-const escrowWallet = activeCustodian.wallet
-const custodianContact = activeCustodian.contact
+const getCustodianById = (custodianId: string | undefined) =>
+  custodians.find((custodian) => custodian.id === custodianId) ?? activeCustodian
+const getCustodianByWallet = (wallet: string) => custodians.find((custodian) => custodian.wallet === wallet)
 const custodyFeeXno = process.env.NANOPAQUETE_CUSTODY_FEE_XNO ?? '0.1'
 const custodianAuthAmountXno = process.env.NANOPAQUETE_CUSTODIAN_AUTH_XNO ?? '0.01'
 const sellerPaymentTtlMs = Number(process.env.NANOPAQUETE_SELLER_PAYMENT_TTL_MS ?? 60 * 60 * 1000)
@@ -279,17 +283,18 @@ const createCode = (digits: number) => {
 const createNanoPaymentUri = (receiver: string, amountXno?: string) =>
   amountXno ? `nano:${receiver}?amount=${nanoToRaw(amountXno)}` : `nano:${receiver}`
 
-const isCustodianSessionValid = (store: Store, sessionId: string) => {
+const getValidCustodianSession = (store: Store, sessionId: string) => {
   const normalized = normalizeClientSessionId(sessionId)
-  if (!normalized) return false
+  if (!normalized) return undefined
   const now = Date.now()
   store.custodianSessions = store.custodianSessions.filter((session) => new Date(session.expiresAt).getTime() > now)
-  return store.custodianSessions.some((session) => session.id === normalized && session.custodianId === activeCustodian.id)
+  return store.custodianSessions.find((session) => session.id === normalized)
 }
 
-const publicOffer = (offer: OfferRecord, context: { clientSessionId?: string; isCustodian?: boolean } = {}) => {
+
+const publicOffer = (offer: OfferRecord, context: { clientSessionId?: string; custodianSession?: CustodianSession } = {}) => {
   const isSeller = Boolean(context.clientSessionId && offer.sellerSessionId && offer.sellerSessionId === context.clientSessionId)
-  const isCustodian = Boolean(context.isCustodian)
+  const isCustodian = Boolean(context.custodianSession && context.custodianSession.custodianId === offer.custodianId)
 
   return {
     id: offer.id,
@@ -321,16 +326,22 @@ const takenOfferResponse = (offer: OfferRecord) => ({
   sellerDialCode: offer.sellerDialCode,
 })
 
-const escrowSessionResponse = (escrow: EscrowRecord) => ({
+const escrowSessionResponse = (escrow: EscrowRecord) => {
+  const custodian = getCustodianById(escrow.custodianId)
+
+  return {
   escrowId: escrow.id,
   publishToken: escrow.publishToken,
   amountXno: escrow.amountXno,
   sellerWallet: escrow.sellerWallet,
   paymentHash: escrow.paymentHash,
-  custodianContact,
-  escrowWallet,
+  custodianId: custodian.id,
+  custodianName: custodian.name,
+  custodianContact: custodian.contact,
+  escrowWallet: custodian.wallet,
   custodyFeeXno,
-})
+}
+}
 
 const findRecoverableEscrow = (store: Store, clientSessionId: string) =>
   clientSessionId
@@ -428,12 +439,24 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     const clientSessionId = normalizeClientSessionId(url.searchParams.get('clientSessionId'))
     const custodianSessionId = normalizeClientSessionId(url.searchParams.get('custodianSessionId'))
     const store = await readStore()
-    const isCustodian = isCustodianSessionValid(store, custodianSessionId)
+    const custodianSession = getValidCustodianSession(store, custodianSessionId)
     if (custodianSessionId) await writeStore(store)
     sendJson(response, 200, {
       offers: store.offers
         .filter((offer) => ['ACTIVE', 'NEGOTIATION', 'RELEASING'].includes(offer.status))
-        .map((offer) => publicOffer(offer, { clientSessionId, isCustodian })),
+        .filter((offer) => !custodianSession || offer.custodianId === custodianSession.custodianId)
+        .map((offer) => publicOffer(offer, { clientSessionId, custodianSession })),
+    })
+    return
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/custodians') {
+    sendJson(response, 200, {
+      custodians: custodians.map((custodian) => ({
+        id: custodian.id,
+        name: custodian.name,
+        contact: custodian.contact,
+      })),
     })
     return
   }
@@ -451,6 +474,8 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
   }
 
   if (request.method === 'POST' && url.pathname === '/api/custodian-auth') {
+    const body = await readJsonBody(request)
+    const custodian = getCustodianById(normalizeText(body.custodianId))
     const store = await readStore()
     const now = Date.now()
     store.custodianAuthIntents = store.custodianAuthIntents.filter(
@@ -458,7 +483,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     )
 
     const existing = store.custodianAuthIntents.find(
-      (intent) => intent.custodianId === activeCustodian.id && intent.status === 'PENDING',
+      (intent) => intent.custodianId === custodian.id && intent.status === 'PENDING',
     )
 
     if (existing) {
@@ -468,11 +493,11 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
 
     const intent: CustodianAuthIntent = {
       id: `cua_${randomUUID().replaceAll('-', '').slice(0, 18)}`,
-      custodianId: activeCustodian.id,
-      senderWallet: escrowWallet,
-      receiverAddress: escrowWallet,
+      custodianId: custodian.id,
+      senderWallet: custodian.wallet,
+      receiverAddress: custodian.wallet,
       amountXno: custodianAuthAmountXno,
-      paymentUri: createNanoPaymentUri(escrowWallet, custodianAuthAmountXno),
+      paymentUri: createNanoPaymentUri(custodian.wallet, custodianAuthAmountXno),
       status: 'PENDING',
       createdAt: new Date(now).toISOString(),
       expiresAt: new Date(now + custodianAuthTtlMs).toISOString(),
@@ -517,9 +542,16 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
         return
       }
 
+      const authenticatedCustodian = getCustodianByWallet(payment.senderWallet)
+
+      if (!authenticatedCustodian || authenticatedCustodian.id !== intent.custodianId) {
+        sendJson(response, 403, { error: 'Esta wallet no corresponde al custodio seleccionado.' })
+        return
+      }
+
       const session: CustodianSession = {
         id: `cus_${randomUUID().replaceAll('-', '').slice(0, 24)}`,
-        custodianId: intent.custodianId,
+        custodianId: authenticatedCustodian.id,
         createdAt: new Date().toISOString(),
         expiresAt: new Date(Date.now() + custodianSessionTtlMs).toISOString(),
       }
@@ -529,7 +561,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       store.custodianSessions.push(session)
       store.usedPayments.push({ hash: payment.hash, purpose: 'custodian_auth', createdAt: new Date().toISOString() })
       await writeStore(store)
-      sendJson(response, 200, { sessionId: session.id, expiresAt: session.expiresAt, custodianName: activeCustodian.name })
+      sendJson(response, 200, { sessionId: session.id, expiresAt: session.expiresAt, custodianId: authenticatedCustodian.id, custodianName: authenticatedCustodian.name })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'No se pudo autenticar al custodio.'
       sendJson(response, 422, {
@@ -542,6 +574,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
   if (request.method === 'POST' && url.pathname === '/api/seller-payments') {
     const body = await readJsonBody(request)
     const clientSessionId = normalizeClientSessionId(body.clientSessionId)
+    const custodian = getCustodianById(normalizeText(body.custodianId))
     const store = await readStore()
     const now = Date.now()
     store.sellerPaymentIntents = store.sellerPaymentIntents.filter(
@@ -549,7 +582,8 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     )
     const intent: SellerPaymentIntent = {
       id: `pay_${randomUUID().replaceAll('-', '').slice(0, 18)}`,
-      receiverAddress: escrowWallet,
+      receiverAddress: custodian.wallet,
+      custodianId: custodian.id,
       status: 'PENDING',
       clientIp: getClientIp(request),
       clientSessionId: clientSessionId || undefined,
@@ -564,7 +598,9 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       receiverAddress: intent.receiverAddress,
       paymentUri: createNanoPaymentUri(intent.receiverAddress),
       expiresAt: intent.expiresAt,
-      custodianContact,
+      custodianId: custodian.id,
+      custodianName: custodian.name,
+      custodianContact: custodian.contact,
     })
     return
   }
@@ -624,6 +660,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
         paymentHash: payment.hash,
         amountXno: payment.amountNano,
         sellerWallet: payment.senderWallet,
+        custodianId: intent.custodianId,
         status: 'PENDING',
         clientIp: intent.clientIp,
         clientSessionId: intent.clientSessionId,
@@ -706,6 +743,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       sellerContact,
       sellerPrivateCode: createCode(8),
       sellerWallet: escrow.sellerWallet,
+      custodianId: escrow.custodianId,
       sellerSessionId: escrow.clientSessionId,
       paymentHash: escrow.paymentHash,
       status: 'ACTIVE',
@@ -716,7 +754,10 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     store.offers.unshift(offer)
     await writeStore(store)
 
-    sendJson(response, 201, { offer: publicOffer(offer), sellerPrivateCode: offer.sellerPrivateCode, custodianContact, custodyFeeXno })
+    {
+      const custodian = getCustodianById(offer.custodianId)
+      sendJson(response, 201, { offer: publicOffer(offer), sellerPrivateCode: offer.sellerPrivateCode, custodianContact: custodian.contact, custodyFeeXno })
+    }
     return
   }
 
@@ -860,9 +901,9 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       id: `rel_${randomUUID().replaceAll('-', '').slice(0, 18)}`,
       offerId: offer.id,
       senderWallet: offer.sellerWallet,
-      receiverAddress: escrowWallet,
+      receiverAddress: getCustodianById(offer.custodianId).wallet,
       amountXno: custodyFeeXno,
-      paymentUri: createNanoPaymentUri(escrowWallet, custodyFeeXno),
+      paymentUri: createNanoPaymentUri(getCustodianById(offer.custodianId).wallet, custodyFeeXno),
       status: 'PENDING',
       createdAt: new Date(now).toISOString(),
       expiresAt: new Date(now + releaseFeeTtlMs).toISOString(),
@@ -883,7 +924,8 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     const custodianSessionId = normalizeClientSessionId(body.custodianSessionId)
     const store = await readStore()
 
-    if (!isCustodianSessionValid(store, custodianSessionId)) {
+    const custodianSession = getValidCustodianSession(store, custodianSessionId)
+    if (!custodianSession) {
       await writeStore(store)
       sendJson(response, 403, { error: 'Autenticacion de custodio preautorizado requerida.' })
       return
@@ -895,8 +937,13 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       return
     }
 
+    if (offer.custodianId !== custodianSession.custodianId) {
+      sendJson(response, 403, { error: 'Esta oferta pertenece a otro custodio.' })
+      return
+    }
+
     if (offer.status === 'RELEASED') {
-      sendJson(response, 200, { offer: publicOffer(offer, { isCustodian: true }), paymentHash: offer.custodianReleaseHash })
+      sendJson(response, 200, { offer: publicOffer(offer, { custodianSession }), paymentHash: offer.custodianReleaseHash })
       return
     }
 
@@ -913,7 +960,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     try {
       const payment = await findIncomingPaymentBySenderAmount({
         receiverWallet: offer.buyerNanoAddress,
-        senderWallet: escrowWallet,
+        senderWallet: getCustodianById(offer.custodianId).wallet,
         amountNano: offer.amountXno,
         createdAfter: offer.releaseRequestedAt,
         excludedHashes: store.usedPayments.map((item) => item.hash),
@@ -924,7 +971,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       offer.closedAt = new Date().toISOString()
       store.usedPayments.push({ hash: payment.hash, purpose: 'custodian_release', createdAt: new Date().toISOString() })
       await writeStore(store)
-      sendJson(response, 200, { offer: publicOffer(offer, { isCustodian: true }), paymentHash: payment.hash })
+      sendJson(response, 200, { offer: publicOffer(offer, { custodianSession }), paymentHash: payment.hash })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'No se pudo validar la liberacion del custodio.'
       sendJson(response, 422, {
@@ -993,7 +1040,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       offer.releaseRequestedAt = new Date().toISOString()
       store.usedPayments.push({ hash: payment.hash, purpose: 'release_fee', createdAt: new Date().toISOString() })
       await writeStore(store)
-      sendJson(response, 200, { offer: publicOffer(offer, { isCustodian: true }), paymentHash: payment.hash })
+      sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId }), paymentHash: payment.hash })
     } catch (error) {
       sendJson(response, 422, {
         error: error instanceof Error ? error.message : 'No se pudo validar la comision de liberacion.',

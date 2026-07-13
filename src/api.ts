@@ -6,6 +6,12 @@ export const nanopaqueteApiUrl =
 export type Currency = 'COP' | 'USD' | 'BTC' | 'EUR'
 export type OfferStatus = 'ACTIVE' | 'NEGOTIATION' | 'RELEASING' | 'RELEASED' | 'CANCELLED' | 'DISPUTED'
 
+export type CustodianOption = {
+  id: string
+  name: string
+  contact: string
+}
+
 export type PublicOffer = {
   id: string
   amountXno: string
@@ -25,6 +31,8 @@ export type SellerPaymentIntent = {
   receiverAddress: string
   paymentUri: string
   expiresAt: string
+  custodianId: string
+  custodianName: string
   custodianContact: string
 }
 
@@ -34,6 +42,8 @@ export type EscrowSession = {
   amountXno: string
   sellerWallet: string
   paymentHash: string
+  custodianId: string
+  custodianName: string
   custodianContact: string
   escrowWallet: string
   custodyFeeXno: string
@@ -86,6 +96,7 @@ export type CustodianAuthIntent = {
 export type CustodianSession = {
   sessionId: string
   expiresAt: string
+  custodianId: string
   custodianName: string
 }
 
@@ -125,6 +136,8 @@ async function requestJson<T>(path: string, options?: RequestInit): Promise<T> {
   return data as T
 }
 
+export const getCustodians = () => requestJson<{ custodians: CustodianOption[] }>('/custodians')
+
 export const getOffers = (clientSessionId: string, custodianSessionId?: string) => {
   const params = new URLSearchParams({ clientSessionId })
   if (custodianSessionId) params.set('custodianSessionId', custodianSessionId)
@@ -136,10 +149,10 @@ export const getBuyerNegotiation = (clientSessionId: string) =>
     `/buyer-negotiation?clientSessionId=${encodeURIComponent(clientSessionId)}`,
   )
 
-export const startSellerPayment = (clientSessionId: string) =>
+export const startSellerPayment = (clientSessionId: string, custodianId: string) =>
   requestJson<SellerPaymentIntent>('/seller-payments', {
     method: 'POST',
-    body: JSON.stringify({ clientSessionId }),
+    body: JSON.stringify({ clientSessionId, custodianId }),
   })
 
 export const verifySellerPayment = (intentId: string, clientSessionId: string) =>
@@ -178,10 +191,10 @@ export const verifyReleaseFee = (intentId: string, clientSessionId: string) =>
     body: JSON.stringify({ clientSessionId }),
   })
 
-export const startCustodianAuth = () =>
+export const startCustodianAuth = (custodianId: string) =>
   requestJson<CustodianAuthIntent>('/custodian-auth', {
     method: 'POST',
-    body: JSON.stringify({}),
+    body: JSON.stringify({ custodianId }),
   })
 
 export const verifyCustodianAuth = (intentId: string) =>
