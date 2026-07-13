@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { CheckCircle2, Copy, RefreshCw, ShieldCheck, Wallet, X } from 'lucide-react'
+import { CheckCircle2, Copy, ShieldCheck, Wallet, X } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import {
   cancelTakenOffer,
@@ -397,10 +397,6 @@ export function Nanopaquete() {
           <h1>Nanopaquete</h1>
           <p className="topbar-subtitle">Custodia de Nano para comercio P2P</p>
         </div>
-        <button className="ghost-button" type="button" onClick={loadOffers} disabled={loading === 'offers'}>
-          <RefreshCw size={18} />
-          Actualizar
-        </button>
       </header>
 
       <section className="intro-band compact-intro-band">
@@ -413,8 +409,7 @@ export function Nanopaquete() {
         </div>
         {custodianAuthIntent && (
           <div className="private-box custodian-auth-box">
-            <p className="eyebrow">Custodio preautorizado</p>
-            <p>Este acceso no es publico. Solo wallets aprobadas previamente pueden operar como custodio; por ahora unicamente la wallet preestablecida puede autenticarse. Transfiere {custodianAuthIntent.amountXno} XNO desde esa misma wallet para activar las acciones de liberacion.</p>
+            <p className="eyebrow">Acceso solo para cuentas autorizadas</p>
             <div className="payment-actions">
               <button className="primary-button" type="button" onClick={() => openNanoPayment(custodianAuthIntent.paymentUri)}>
                 <Wallet size={18} />
@@ -428,9 +423,15 @@ export function Nanopaquete() {
             <div className="payment-qr" aria-label="QR de autenticacion de custodio">
               <QRCodeSVG value={custodianAuthIntent.paymentUri} size={176} marginSize={2} />
             </div>
-            <button className="primary-button" type="button" onClick={handleVerifyCustodianAuth} disabled={loading === 'custodian-auth-verify'}>
-              Verificar acceso
-            </button>
+            <div className="button-row">
+              <button className="primary-button" type="button" onClick={handleVerifyCustodianAuth} disabled={loading === 'custodian-auth-verify'}>
+                Verificar acceso
+              </button>
+              <button className="ghost-button danger-button" type="button" onClick={() => setCustodianAuthIntent(null)}>
+                <X size={16} />
+                Cerrar
+              </button>
+            </div>
           </div>
         )}
       </section>

@@ -157,6 +157,7 @@ const getConfiguredCustodians = () => {
 }
 
 const custodians = getConfiguredCustodians()
+const authorizedCustodianWallets = new Set(custodians.map((custodian) => custodian.wallet))
 const activeCustodian = custodians[0]
 const escrowWallet = activeCustodian.wallet
 const custodianContact = activeCustodian.contact
@@ -510,6 +511,11 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
         createdAfter: intent.createdAt,
         excludedHashes: store.usedPayments.map((item) => item.hash),
       })
+
+      if (!authorizedCustodianWallets.has(payment.senderWallet)) {
+        sendJson(response, 403, { error: 'Esta wallet no esta autorizada como custodio.' })
+        return
+      }
 
       const session: CustodianSession = {
         id: `cus_${randomUUID().replaceAll('-', '').slice(0, 24)}`,
