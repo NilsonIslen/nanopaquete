@@ -39,6 +39,8 @@ export type PublishOfferPayload = {
   publishToken: string
   currency: Currency
   price: string
+  sellerCountry: string
+  sellerDialCode: string
   sellerContact: string
 }
 
@@ -57,6 +59,8 @@ export type TakeOfferPayload = {
 export type TakenOffer = {
   offer: PublicOffer
   sellerContact: string
+  sellerCountry?: string
+  sellerDialCode?: string
 }
 
 async function requestJson<T>(path: string, options?: RequestInit): Promise<T> {

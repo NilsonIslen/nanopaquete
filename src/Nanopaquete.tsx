@@ -19,9 +19,23 @@ import './Nanopaquete.css'
 
 const currencies: Currency[] = ['COP', 'USD', 'BTC', 'EUR']
 
+const contactCountries = [
+  { country: 'Colombia', dialCode: '+57' },
+  { country: 'Estados Unidos', dialCode: '+1' },
+  { country: 'Mexico', dialCode: '+52' },
+  { country: 'Argentina', dialCode: '+54' },
+  { country: 'Chile', dialCode: '+56' },
+  { country: 'Peru', dialCode: '+51' },
+  { country: 'Venezuela', dialCode: '+58' },
+  { country: 'Espana', dialCode: '+34' },
+  { country: 'Otro', dialCode: '' },
+]
+
 const initialSellerForm = {
   currency: 'COP' as Currency,
   price: '',
+  sellerCountry: 'Colombia',
+  sellerDialCode: '+57',
   sellerContact: '',
 }
 
@@ -185,6 +199,8 @@ export function Nanopaquete() {
         publishToken: escrowSession.publishToken,
         currency: sellerForm.currency,
         price: sellerForm.price,
+        sellerCountry: sellerForm.sellerCountry,
+        sellerDialCode: sellerForm.sellerDialCode,
         sellerContact: sellerForm.sellerContact,
       })
       setPublishedOffer(response)
@@ -365,9 +381,33 @@ export function Nanopaquete() {
                 />
               </label>
               <label>
+                Pais del contacto
+                <select
+                  value={sellerForm.sellerCountry}
+                  onChange={(event) => {
+                    const selected = contactCountries.find((item) => item.country === event.target.value)
+                    updateSellerForm('sellerCountry', event.target.value)
+                    updateSellerForm('sellerDialCode', selected?.dialCode ?? '')
+                  }}
+                >
+                  {contactCountries.map((item) => (
+                    <option key={item.country} value={item.country}>{item.country}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Extension internacional
+                <input
+                  placeholder="+57"
+                  value={sellerForm.sellerDialCode}
+                  onChange={(event) => updateSellerForm('sellerDialCode', event.target.value)}
+                  required
+                />
+              </label>
+              <label>
                 Contacto privado
                 <input
-                  placeholder="+57... WhatsApp o @usuario Telegram"
+                  placeholder="3008188284 o @usuario Telegram"
                   value={sellerForm.sellerContact}
                   onChange={(event) => updateSellerForm('sellerContact', event.target.value)}
                   required
@@ -449,8 +489,10 @@ export function Nanopaquete() {
               <h3>Comunicate con el vendedor para acordar como haras el pago.</h3>
               <p>Los XNO de esta oferta ya estan bloqueados en custodia. El vendedor solo puede pedir que se liberen a la wallet Nano que registraste cuando reciba tu pago.</p>
               <dl>
+                <dt>Pais vendedor</dt>
+                <dd>{takenOffer.sellerCountry || 'No informado'}</dd>
                 <dt>Contacto vendedor</dt>
-                <dd>{takenOffer.sellerContact}</dd>
+                <dd>{takenOffer.sellerDialCode ? takenOffer.sellerDialCode + ' ' : ''}{takenOffer.sellerContact}</dd>
                 <dt>Oferta tomada</dt>
                 <dd>{takenOffer.offer.amountXno} XNO por {takenOffer.offer.price} {takenOffer.offer.currency}</dd>
               </dl>

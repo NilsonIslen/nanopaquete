@@ -44,6 +44,8 @@ type OfferRecord = {
   currency: Currency
   price: string
   sellerContact: string
+  sellerCountry?: string
+  sellerDialCode?: string
   sellerPrivateCode: string
   sellerWallet?: string
   paymentHash?: string
@@ -294,6 +296,8 @@ const renderAdmin = (offers: OfferRecord[]) => `<!doctype html>
               <dt>Estado</dt><dd><span class="status">${statusLabel(offer.status)}</span></dd>
               <dt>ID oferta</dt><dd>${escapeHtml(offer.id)}</dd>
               <dt>ID custodia</dt><dd>${escapeHtml(offer.escrowId)}</dd>
+              <dt>Pais vendedor</dt><dd>${escapeHtml(offer.sellerCountry)}</dd>
+              <dt>Extension contacto</dt><dd>${escapeHtml(offer.sellerDialCode)}</dd>
               <dt>Contacto vendedor</dt><dd>${escapeHtml(offer.sellerContact)}</dd>
               <dt>Codigo vendedor</dt><dd>${escapeHtml(offer.sellerPrivateCode)}</dd>
               <dt>Wallet vendedor</dt><dd>${escapeHtml(offer.sellerWallet)}</dd>
@@ -451,6 +455,8 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     const publishToken = normalizeText(body.publishToken)
     const currency = normalizeText(body.currency).toUpperCase()
     const price = normalizeText(body.price)
+    const sellerCountry = normalizeText(body.sellerCountry)
+    const sellerDialCode = normalizeText(body.sellerDialCode)
     const sellerContact = normalizeText(body.sellerContact)
 
     if (!isCurrency(currency)) {
@@ -460,6 +466,11 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
 
     if (!price) {
       sendJson(response, 400, { error: 'Ingresa el precio esperado.' })
+      return
+    }
+
+    if (!sellerCountry || !sellerDialCode) {
+      sendJson(response, 400, { error: 'Ingresa pais y extension del contacto del vendedor.' })
       return
     }
 
@@ -487,6 +498,8 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       amountXno: escrow.amountXno,
       currency,
       price,
+      sellerCountry,
+      sellerDialCode,
       sellerContact,
       sellerPrivateCode: createCode(8),
       sellerWallet: escrow.sellerWallet,
@@ -538,6 +551,8 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     sendJson(response, 200, {
       offer: publicOffer(offer),
       sellerContact: offer.sellerContact,
+      sellerCountry: offer.sellerCountry,
+      sellerDialCode: offer.sellerDialCode,
     })
     return
   }
