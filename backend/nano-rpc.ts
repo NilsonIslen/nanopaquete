@@ -269,6 +269,102 @@ export async function findIncomingPaymentBySenderAmount({
   }
 }
 
+export async function findIncomingPaymentByAmount({
+  receiverWallet,
+  amountNano,
+  createdAfter,
+  excludedHashes = [],
+}: {
+  receiverWallet: string
+  amountNano: string
+  createdAfter?: string
+  excludedHashes?: string[]
+}): Promise<IncomingPayment> {
+  const expectedRaw = nanoToRaw(amountNano)
+  const minimumTimestampMs = createdAfter ? new Date(createdAfter).getTime() : undefined
+  const excluded = new Set(excludedHashes.map(normalizeNanoHash))
+  const isRecentEnough = (entry: Record<string, unknown>) => {
+    if (!minimumTimestampMs) return true
+    const timestamp = Number(entry.local_timestamp ?? entry.timestamp)
+    if (!Number.isFinite(timestamp) || timestamp <= 0) return false
+    return timestamp * 1000 >= minimumTimestampMs
+  }
+  const getReceivableMatch = (entries: Array<[string, ReceivableEntry]>) =>
+    entries.find(
+      ([hash, entry]) =>
+        Boolean(entry.source) &&
+        isAcceptedAmount(entry.amount, expectedRaw) &&
+        isNanoHash(hash) &&
+        !excluded.has(normalizeNanoHash(hash)),
+    )
+
+  const receivable = await nanoRpc(
+    {
+      action: 'receivable',
+      account: receiverWallet,
+      count: '100',
+      source: 'true',
+      include_only_confirmed: 'true',
+    },
+    { shouldRetryWithFallback: (data) => !getReceivableMatch(getReceivableEntries(data)) },
+  )
+  const pendingPayment = getReceivableMatch(getReceivableEntries(receivable))
+
+  if (pendingPayment) {
+    const [hash, entry] = pendingPayment
+    const block = await getNanoBlockInfo(hash)
+    if (isRecentEnough(block)) {
+      const senderWallet = entry.source ?? ''
+      const issue = getIncomingPaymentIssue(block, { senderWallet, receiverWallet })
+      if (issue) throw new Error(issue)
+      return {
+        hash: normalizeNanoHash(hash),
+        senderWallet,
+        amountNano: formatRawAsNano(entry.amount),
+      }
+    }
+  }
+
+  const data = await nanoRpc(
+    {
+      action: 'account_history',
+      account: receiverWallet,
+      count: '100',
+      raw: 'true',
+    },
+    { shouldRetryWithFallback: (history) => !Array.isArray(history.history) || !getReceiveMatch(history.history) },
+  )
+
+  if (!Array.isArray(data.history)) {
+    throw new Error('No encontre movimientos recientes en la cuenta de custodia.')
+  }
+
+  const payment = getReceiveMatch(data.history)
+  if (!payment?.hash || !payment.account || !payment.amount) {
+    throw new Error(`No encontre un pago confirmado de ${amountNano} XNO hacia el custodio lider asignado.`)
+  }
+
+  return {
+    hash: normalizeNanoHash(payment.hash),
+    senderWallet: payment.account,
+    amountNano: formatRawAsNano(payment.amount),
+  }
+
+  function getReceiveMatch(history: HistoryEntry[]) {
+    return history.find(
+      (entry) =>
+        getBlockType(entry) === 'receive' &&
+        entry.confirmed === 'true' &&
+        Boolean(entry.account) &&
+        isAcceptedAmount(entry.amount, expectedRaw) &&
+        Boolean(entry.hash) &&
+        isNanoHash(entry.hash ?? '') &&
+        isRecentEnough(entry) &&
+        !excluded.has(normalizeNanoHash(entry.hash ?? '')),
+    )
+  }
+}
+
 async function getNanoBlockInfo(hash: string) {
   const data = await nanoRpc({
     action: 'block_info',

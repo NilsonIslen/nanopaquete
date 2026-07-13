@@ -579,7 +579,7 @@ dd {
 
 .custodian-list-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
   gap: 12px;
   align-items: center;
   border: 1px solid #d9e2ec;
@@ -603,8 +603,30 @@ dd {
   overflow-wrap: anywhere;
 }
 
+.custodian-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.custodian-row-actions button {
+  min-height: 36px;
+}
+
 .custodian-admin-form {
   padding-top: 0;
+}
+
+.checkbox-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.checkbox-row input {
+  width: auto;
 }
 
 .brand-lockup {

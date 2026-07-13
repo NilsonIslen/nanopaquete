@@ -16,6 +16,7 @@ import {
   startSellerPayment,
   takeOffer,
   updateOfferPrice,
+  updateManagedCustodianLeader,
   verifyCustodianAuth,
   verifyCustodianRelease,
   verifyReleaseFee,
@@ -72,6 +73,7 @@ const initialCustodianForm = {
   name: '',
   wallet: '',
   contact: '',
+  isLeader: false,
 }
 
 const sellerPaymentStorageKey = 'nanopaquete:seller-payment'
@@ -166,7 +168,7 @@ export function Nanopaquete() {
   const [offers, setOffers] = useState<PublicOffer[]>([])
   const [custodians, setCustodians] = useState<CustodianOption[]>([])
   const [managedCustodians, setManagedCustodians] = useState<ManagedCustodian[]>([])
-  const [leaderCustodianId, setLeaderCustodianId] = useState('')
+  const [canManageCustodians, setCanManageCustodians] = useState(false)
   const [custodianForm, setCustodianForm] = useState(initialCustodianForm)
   const [selectedCustodianId, setSelectedCustodianId] = useState('')
   const [selectedOffer, setSelectedOffer] = useState<PublicOffer | null>(null)
@@ -184,12 +186,11 @@ export function Nanopaquete() {
   const [clientSessionId] = useState(getClientSessionId)
   const visibleOffers = takenOffer ? [takenOffer.offer] : sortOffers(offers, Boolean(custodianSession))
   const takenOfferId = takenOffer?.offer.id
-  const canManageCustodians = Boolean(
-    custodianSession?.isLeader || (leaderCustodianId && custodianSession?.custodianId === leaderCustodianId),
-  )
   const displayedManagedCustodians = [...managedCustodians].sort((left, right) => {
     if (left.id === custodianSession?.custodianId) return -1
     if (right.id === custodianSession?.custodianId) return 1
+    if (left.isLeader && !right.isLeader) return -1
+    if (!left.isLeader && right.isLeader) return 1
     return left.name.localeCompare(right.name, 'es')
   })
 
@@ -219,7 +220,7 @@ export function Nanopaquete() {
     if (!sessionId) return
     const response = await getManagedCustodians(sessionId)
     setManagedCustodians(response.custodians)
-    setLeaderCustodianId(response.leaderCustodianId)
+    setCanManageCustodians(response.canManage)
   }
 
   useEffect(() => {
@@ -304,7 +305,7 @@ export function Nanopaquete() {
   useEffect(() => {
     if (!custodianSession) {
       setManagedCustodians([])
-      setLeaderCustodianId('')
+      setCanManageCustodians(false)
       return
     }
 
@@ -321,7 +322,7 @@ export function Nanopaquete() {
     setBuyerForm((current) => ({ ...current, [field]: value }))
   }
 
-  const updateCustodianForm = (field: keyof typeof custodianForm, value: string) => {
+  const updateCustodianForm = (field: keyof typeof custodianForm, value: string | boolean) => {
     setCustodianForm((current) => ({ ...current, [field]: value }))
   }
 
@@ -337,9 +338,9 @@ export function Nanopaquete() {
         name: custodianForm.name,
         wallet: custodianForm.wallet,
         contact: custodianForm.contact,
+        isLeader: custodianForm.isLeader,
       })
       setManagedCustodians(response.custodians)
-      setLeaderCustodianId(response.leaderCustodianId)
       setCustodianForm(initialCustodianForm)
       await loadCustodians()
     } catch (requestError) {
@@ -357,10 +358,24 @@ export function Nanopaquete() {
     try {
       const response = await deleteManagedCustodian(custodianId, custodianSession.sessionId)
       setManagedCustodians(response.custodians)
-      setLeaderCustodianId(response.leaderCustodianId)
       await loadCustodians()
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'No se pudo eliminar el custodio.')
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  const handleToggleCustodianLeader = async (custodianId: string, isLeader: boolean) => {
+    if (!custodianSession || !canManageCustodians) return
+    setError(null)
+    setLoading(`custodian-leader:${custodianId}`)
+
+    try {
+      const response = await updateManagedCustodianLeader(custodianId, custodianSession.sessionId, isLeader)
+      setManagedCustodians(response.custodians)
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'No se pudo actualizar el lider.')
     } finally {
       setLoading(null)
     }
@@ -562,7 +577,7 @@ export function Nanopaquete() {
     setLoading('custodian-auth-start')
 
     try {
-      const intent = await startCustodianAuth(selectedCustodianId)
+      const intent = await startCustodianAuth()
       setCustodianAuthIntent(intent)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'No se pudo iniciar la autenticacion de custodio.')
@@ -592,7 +607,7 @@ export function Nanopaquete() {
     setCustodianSession(null)
     setCustodianAuthIntent(null)
     setManagedCustodians([])
-    setLeaderCustodianId('')
+    setCanManageCustodians(false)
     setCustodianForm(initialCustodianForm)
     window.localStorage.removeItem(custodianSessionStorageKey)
     setError(null)
@@ -681,20 +696,33 @@ export function Nanopaquete() {
                             <span>{custodian.contact}</span>
                             <small>{custodian.wallet}</small>
                           </div>
-                          {custodian.id === leaderCustodianId ? (
+                          {custodian.isLeader ? (
                             <span className="offer-status-pill">Lider</span>
                           ) : !canManageCustodians ? (
                             <span className="offer-status-pill">Custodio</span>
                           ) : (
-                            <button
-                              className="ghost-button danger-button"
-                              type="button"
-                              onClick={() => void handleDeleteCustodian(custodian.id)}
-                              disabled={loading === `custodian-delete:${custodian.id}`}
-                            >
-                              <X size={16} />
-                              Eliminar
-                            </button>
+                            <span className="offer-status-pill">Custodio</span>
+                          )}
+                          {canManageCustodians && (
+                            <div className="custodian-row-actions">
+                              <button
+                                className="ghost-button"
+                                type="button"
+                                onClick={() => void handleToggleCustodianLeader(custodian.id, !custodian.isLeader)}
+                                disabled={loading === `custodian-leader:${custodian.id}`}
+                              >
+                                {custodian.isLeader ? 'Quitar lider' : 'Marcar lider'}
+                              </button>
+                              <button
+                                className="ghost-button danger-button"
+                                type="button"
+                                onClick={() => void handleDeleteCustodian(custodian.id)}
+                                disabled={loading === `custodian-delete:${custodian.id}`}
+                              >
+                                <X size={16} />
+                                Eliminar
+                              </button>
+                            </div>
                           )}
                         </article>
                       ))}
@@ -719,6 +747,14 @@ export function Nanopaquete() {
                         Contacto
                         <input value={custodianForm.contact} onChange={(event) => updateCustodianForm('contact', event.target.value)} required />
                       </label>
+                      <label className="checkbox-row">
+                        <input
+                          type="checkbox"
+                          checked={custodianForm.isLeader}
+                          onChange={(event) => updateCustodianForm('isLeader', event.target.checked)}
+                        />
+                        Lider
+                      </label>
                       <button className="primary-button" type="submit" disabled={loading === 'custodian-add'}>
                         Agregar custodio
                       </button>
@@ -731,7 +767,7 @@ export function Nanopaquete() {
                 </button>
               </>
             ) : (
-              <button className="primary-button" type="button" onClick={handleStartCustodianAuth} disabled={loading === 'custodian-auth-start' || !selectedCustodianId}>
+              <button className="primary-button" type="button" onClick={handleStartCustodianAuth} disabled={loading === 'custodian-auth-start'}>
                 <ShieldCheck size={18} />
                 Iniciar sesion
               </button>
@@ -743,7 +779,8 @@ export function Nanopaquete() {
       {activeView === 'custodian-auth' && custodianAuthIntent && (
         <section className="intro-band compact-intro-band auth-panel-band">
           <div className="private-box custodian-auth-box">
-            <p className="eyebrow">Acceso solo para cuentas autorizadas</p>
+            <p className="eyebrow">Acceso solo para custodios registrados</p>
+            <p>Transfiere {custodianAuthIntent.amountXno} XNO desde tu cuenta Nano de custodio a la cuenta lider asignada por Nanopaquete.</p>
             <div className="payment-actions">
               <button className="primary-button" type="button" onClick={() => openNanoPayment(custodianAuthIntent.paymentUri)}>
                 <Wallet size={18} />

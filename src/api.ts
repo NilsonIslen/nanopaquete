@@ -14,6 +14,7 @@ export type CustodianOption = {
 
 export type ManagedCustodian = CustodianOption & {
   wallet: string
+  isLeader?: boolean
 }
 
 export type PublicOffer = {
@@ -94,8 +95,7 @@ export type TakenOffer = {
 
 export type CustodianAuthIntent = {
   id: string
-  custodianId: string
-  senderWallet: string
+  leaderCustodianId: string
   receiverAddress: string
   amountXno: string
   paymentUri: string
@@ -215,10 +215,10 @@ export const verifyReleaseFee = (intentId: string, clientSessionId: string) =>
     body: JSON.stringify({ clientSessionId }),
   })
 
-export const startCustodianAuth = (custodianId: string) =>
+export const startCustodianAuth = () =>
   requestJson<CustodianAuthIntent>('/custodian-auth', {
     method: 'POST',
-    body: JSON.stringify({ custodianId }),
+    body: JSON.stringify({}),
   })
 
 export const verifyCustodianAuth = (intentId: string) =>
@@ -228,12 +228,12 @@ export const verifyCustodianAuth = (intentId: string) =>
   })
 
 export const getManagedCustodians = (custodianSessionId: string) =>
-  requestJson<{ custodians: ManagedCustodian[]; leaderCustodianId: string; canManage: boolean }>(
+  requestJson<{ custodians: ManagedCustodian[]; canManage: boolean }>(
     `/custodian-admin/custodians?custodianSessionId=${encodeURIComponent(custodianSessionId)}`,
   )
 
-export const addManagedCustodian = (payload: { custodianSessionId: string; name: string; wallet: string; contact: string }) =>
-  requestJson<{ custodian: ManagedCustodian; custodians: ManagedCustodian[]; leaderCustodianId: string }>(
+export const addManagedCustodian = (payload: { custodianSessionId: string; name: string; wallet: string; contact: string; isLeader: boolean }) =>
+  requestJson<{ custodian: ManagedCustodian; custodians: ManagedCustodian[] }>(
     '/custodian-admin/custodians',
     {
       method: 'POST',
@@ -242,11 +242,20 @@ export const addManagedCustodian = (payload: { custodianSessionId: string; name:
   )
 
 export const deleteManagedCustodian = (custodianId: string, custodianSessionId: string) =>
-  requestJson<{ custodians: ManagedCustodian[]; leaderCustodianId: string }>(
+  requestJson<{ custodians: ManagedCustodian[] }>(
     `/custodian-admin/custodians/${encodeURIComponent(custodianId)}`,
     {
       method: 'DELETE',
       body: JSON.stringify({ custodianSessionId }),
+    },
+  )
+
+export const updateManagedCustodianLeader = (custodianId: string, custodianSessionId: string, isLeader: boolean) =>
+  requestJson<{ custodians: ManagedCustodian[] }>(
+    `/custodian-admin/custodians/${encodeURIComponent(custodianId)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ custodianSessionId, isLeader }),
     },
   )
 
