@@ -110,14 +110,28 @@ const nautilusDownloadUrl = 'https://nautilus.io/'
 const natriumDownloadUrl = 'https://natrium.io/'
 
 const contactCountries = [
-  { country: 'Colombia', dialCode: '+57' },
-  { country: 'Estados Unidos', dialCode: '+1' },
-  { country: 'Mexico', dialCode: '+52' },
   { country: 'Argentina', dialCode: '+54' },
+  { country: 'Bolivia', dialCode: '+591' },
+  { country: 'Brasil', dialCode: '+55' },
   { country: 'Chile', dialCode: '+56' },
-  { country: 'Peru', dialCode: '+51' },
-  { country: 'Venezuela', dialCode: '+58' },
+  { country: 'Colombia', dialCode: '+57' },
+  { country: 'Costa Rica', dialCode: '+506' },
+  { country: 'Cuba', dialCode: '+53' },
+  { country: 'Ecuador', dialCode: '+593' },
+  { country: 'El Salvador', dialCode: '+503' },
   { country: 'Espana', dialCode: '+34' },
+  { country: 'Estados Unidos', dialCode: '+1' },
+  { country: 'Guatemala', dialCode: '+502' },
+  { country: 'Haiti', dialCode: '+509' },
+  { country: 'Honduras', dialCode: '+504' },
+  { country: 'Mexico', dialCode: '+52' },
+  { country: 'Nicaragua', dialCode: '+505' },
+  { country: 'Panama', dialCode: '+507' },
+  { country: 'Paraguay', dialCode: '+595' },
+  { country: 'Peru', dialCode: '+51' },
+  { country: 'Republica Dominicana', dialCode: '+1' },
+  { country: 'Uruguay', dialCode: '+598' },
+  { country: 'Venezuela', dialCode: '+58' },
   { country: 'Otro', dialCode: '' },
 ]
 
@@ -515,6 +529,14 @@ export function Nanopaquete() {
   const handleCancelSellerPayment = () => {
     setSellerPayment(null)
     setError(null)
+  }
+
+  const handleReturnToSellerForm = () => {
+    setEscrowSession(null)
+    setSellerPayment(null)
+    setSellerForm(initialSellerForm)
+    setError(null)
+    window.localStorage.removeItem(sellerOfferDraftStorageKey)
   }
 
   const handleVerifySellerPayment = async () => {
@@ -1147,6 +1169,9 @@ export function Nanopaquete() {
                 <dt>Comision de liberacion</dt>
                 <dd>{escrowSession.custodyFeeXno} XNO</dd>
               </dl>
+              <button className="primary-button" type="button" onClick={handleReturnToSellerForm}>
+                Ya he tomado la informacion, regresar al formulario
+              </button>
             </div>
           )}
 
