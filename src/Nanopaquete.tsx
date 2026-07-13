@@ -100,6 +100,7 @@ export function Nanopaquete() {
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [clientSessionId] = useState(getClientSessionId)
+  const visibleOffers = takenOffer ? [takenOffer.offer] : offers
 
   const loadOffers = async () => {
     setError(null)
@@ -471,11 +472,11 @@ export function Nanopaquete() {
             <div>
               <h2>Ofertas disponibles</h2>
             </div>
-            <span>{offers.length} visibles</span>
+            <span>{visibleOffers.length} visibles</span>
           </div>
 
           <div className="offer-list">
-            {offers.map((offer) => {
+            {visibleOffers.map((offer) => {
               const isSelected = selectedOffer?.id === offer.id
 
               return (
@@ -576,7 +577,7 @@ export function Nanopaquete() {
                 </article>
               )
             })}
-            {!offers.length && <p className="empty-state">No hay ofertas activas en este momento.</p>}
+            {!visibleOffers.length && <p className="empty-state">No hay ofertas activas en este momento.</p>}
           </div>
 
 
