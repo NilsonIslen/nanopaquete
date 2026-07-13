@@ -562,3 +562,48 @@ dd {
   color: #1d562f;
   border: 1px solid #bee4c6;
 }
+
+.brand-lockup {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.brand-icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  background: #e8f3e6;
+  color: #206b3a;
+  border: 1px solid #c7dcc1;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.icon-button {
+  width: 42px;
+  min-width: 42px;
+  padding: 0;
+  background: #eef3ec;
+  color: #1e3224;
+  border: 1px solid #cfdbcc;
+}
+
+.active-custodian-button {
+  background: #206b3a;
+  color: #ffffff;
+  border-color: #206b3a;
+}
+
+.auth-panel-band {
+  align-items: start;
+}

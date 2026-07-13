@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { CheckCircle2, Copy, ShieldCheck, Wallet, X } from 'lucide-react'
+import { CheckCircle2, Copy, PackageCheck, ShieldCheck, Wallet, X } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import {
   cancelTakenOffer,
@@ -236,7 +236,6 @@ export function Nanopaquete() {
     }
   }
 
-  const selectedCustodian = custodians.find((custodian) => custodian.id === selectedCustodianId)
 
   const handleCancelSellerPayment = () => {
     setSellerPayment(null)
@@ -433,30 +432,36 @@ export function Nanopaquete() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <div>
-          <h1>Nanopaquete</h1>
-          <p className="topbar-subtitle">Custodia de Nano para comercio P2P</p>
+        <div className="brand-lockup">
+          <span className="brand-icon" aria-hidden="true">
+            <PackageCheck size={26} />
+          </span>
+          <div>
+            <h1>Nanopaquete</h1>
+            <p className="topbar-subtitle">Custodia de Nano para comercio P2P</p>
+          </div>
         </div>
-      </header>
-
-      <section className="intro-band compact-intro-band">
-        <div className="flow-grid custodian-auth-row" aria-label="Autenticacion de custodios">
-          {custodianSession ? (
-            <span className="custodian-session-pill">
-              Custodio autenticado: {custodianSession.custodianName}
-              <button type="button" onClick={() => void handleCloseCustodianSession()}>
-                <X size={16} />
-                Cerrar sesion
-              </button>
-            </span>
-          ) : (
-            <button className="ghost-button" type="button" onClick={handleStartCustodianAuth} disabled={loading === 'custodian-auth-start'}>
-              <ShieldCheck size={18} />
-              Acceso custodio autorizado
+        <div className="topbar-actions">
+          <button
+            className={custodianSession ? 'icon-button active-custodian-button' : 'icon-button'}
+            type="button"
+            onClick={custodianSession ? undefined : handleStartCustodianAuth}
+            disabled={loading === 'custodian-auth-start'}
+            aria-label={custodianSession ? `Custodio autenticado: ${custodianSession.custodianName}` : 'Acceso custodio autorizado'}
+            title={custodianSession ? `Custodio autenticado: ${custodianSession.custodianName}` : 'Acceso custodio autorizado'}
+          >
+            <ShieldCheck size={20} />
+          </button>
+          {custodianSession && (
+            <button className="icon-button" type="button" onClick={() => void handleCloseCustodianSession()} aria-label="Cerrar sesion custodio" title="Cerrar sesion custodio">
+              <X size={18} />
             </button>
           )}
         </div>
-        {custodianAuthIntent && (
+      </header>
+
+      {custodianAuthIntent && (
+        <section className="intro-band compact-intro-band auth-panel-band">
           <div className="private-box custodian-auth-box">
             <p className="eyebrow">Acceso solo para cuentas autorizadas</p>
             <div className="payment-actions">
@@ -482,8 +487,8 @@ export function Nanopaquete() {
               </button>
             </div>
           </div>
-        )}
-      </section>
+        </section>
+      )}
 
       {error && <div className="status-message error">{error}</div>}
 
@@ -507,7 +512,6 @@ export function Nanopaquete() {
                   ))}
                 </select>
               </label>
-              {selectedCustodian && <p>Contacto custodio: {selectedCustodian.contact}</p>}
               <p>
                 Transfiere a la cuenta de custodia la cantidad exacta de XNO que quieres vender.
               </p>
