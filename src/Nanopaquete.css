@@ -149,25 +149,6 @@ button:disabled {
   line-height: 1.55;
 }
 
-.asset-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.asset-list span {
-  min-height: 32px;
-  display: inline-flex;
-  align-items: center;
-  border: 1px solid #c5d4e2;
-  border-radius: 8px;
-  background: #f7fbff;
-  color: #24384d;
-  padding: 0 10px;
-  font-size: 0.86rem;
-  font-weight: 800;
-}
-
 .inline-heading {
   grid-template-columns: 1fr auto;
   align-items: end;

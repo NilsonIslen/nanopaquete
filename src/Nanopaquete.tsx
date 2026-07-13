@@ -27,7 +27,6 @@ import {
   type CustodianSession,
   type EscrowSession,
   type PublicOffer,
-  type PublishedOffer,
   type ReleaseFeeIntent,
   type SellerPaymentIntent,
   type TakenOffer,
@@ -130,6 +129,8 @@ const initialSellerForm = {
   sellerContact: '',
 }
 
+type SellerForm = typeof initialSellerForm
+
 const initialBuyerForm = {
   nanoAddress: '',
   country: 'Colombia',
@@ -144,6 +145,7 @@ const initialCustodianForm = {
   isLeader: false,
 }
 
+const sellerOfferDraftStorageKey = 'nanopaquete:seller-offer-draft'
 const sellerPaymentStorageKey = 'nanopaquete:seller-payment'
 const takenOfferStorageKey = 'nanopaquete:taken-offer'
 const custodianSessionStorageKey = 'nanopaquete:custodian-session'
@@ -168,6 +170,24 @@ const getStoredSellerPayment = () => {
     return payment && new Date(payment.expiresAt).getTime() > Date.now() ? payment : null
   } catch {
     return null
+  }
+}
+
+const getStoredSellerOfferDraft = (): SellerForm => {
+  try {
+    const value = window.localStorage.getItem(sellerOfferDraftStorageKey)
+    const draft = value ? (JSON.parse(value) as Partial<SellerForm>) : null
+    const currency = currencies.includes(draft?.currency as Currency) ? draft?.currency as Currency : initialSellerForm.currency
+
+    return draft
+      ? {
+          ...initialSellerForm,
+          ...draft,
+          currency,
+        }
+      : initialSellerForm
+  } catch {
+    return initialSellerForm
   }
 }
 
@@ -247,10 +267,9 @@ const groupOffers = (offers: PublicOffer[]): OfferGroup[] => {
 }
 
 export function Nanopaquete() {
-  const [sellerForm, setSellerForm] = useState(initialSellerForm)
+  const [sellerForm, setSellerForm] = useState(getStoredSellerOfferDraft)
   const [sellerPayment, setSellerPayment] = useState<SellerPaymentIntent | null>(getStoredSellerPayment)
   const [escrowSession, setEscrowSession] = useState<EscrowSession | null>(null)
-  const [publishedOffer, setPublishedOffer] = useState<PublishedOffer | null>(null)
   const [offers, setOffers] = useState<PublicOffer[]>([])
   const [custodians, setCustodians] = useState<CustodianOption[]>([])
   const [managedCustodians, setManagedCustodians] = useState<ManagedCustodian[]>([])
@@ -474,14 +493,15 @@ export function Nanopaquete() {
     }
   }
 
-  const handleStartSellerPayment = async () => {
+  const handleStartSellerPayment = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
     setError(null)
-    setPublishedOffer(null)
     setEscrowSession(null)
     setLoading('start-payment')
 
     try {
       const intent = await startSellerPayment(clientSessionId, selectedCustodianId)
+      window.localStorage.setItem(sellerOfferDraftStorageKey, JSON.stringify(sellerForm))
       setSellerPayment(intent)
       setActiveView('create-offer')
     } catch (requestError) {
@@ -504,38 +524,22 @@ export function Nanopaquete() {
 
     try {
       const session = await verifySellerPayment(sellerPayment.intentId, clientSessionId)
-      setEscrowSession(session)
-      setSellerPayment(null)
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'El deposito aun no fue confirmado.')
-    } finally {
-      setLoading(null)
-    }
-  }
-
-  const handlePublishSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (!escrowSession) return
-    setError(null)
-    setLoading('publish')
-
-    try {
-      const response = await publishOffer({
-        escrowId: escrowSession.escrowId,
-        publishToken: escrowSession.publishToken,
+      await publishOffer({
+        escrowId: session.escrowId,
+        publishToken: session.publishToken,
         currency: sellerForm.currency,
         price: sellerForm.price,
         sellerCountry: sellerForm.sellerCountry,
         sellerDialCode: sellerForm.sellerDialCode,
         sellerContact: sellerForm.sellerContact,
       })
-      setPublishedOffer(response)
-      setEscrowSession(null)
+      setEscrowSession(session)
+      setSellerPayment(null)
       setSellerForm(initialSellerForm)
-      setActiveView('offers')
+      window.localStorage.removeItem(sellerOfferDraftStorageKey)
       await loadOffers()
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'No se pudo publicar la oferta.')
+      setError(requestError instanceof Error ? requestError.message : 'El deposito aun no fue confirmado o no se pudo publicar la oferta.')
     } finally {
       setLoading(null)
     }
@@ -1007,18 +1011,12 @@ export function Nanopaquete() {
         <div className="panel seller-panel">
           <div className="panel-heading">
             <h2>Crear oferta</h2>
-            <p>Deposita los XNO que quieres vender. Cuando Nanopaquete detecte el depósito, publica el activo y el precio que esperas recibir.</p>
-            <p>Activos disponibles para negociar por Nano:</p>
-            <div className="asset-list" aria-label="Activos disponibles para negociar por Nano">
-              {currencies.map((currency) => (
-                <span key={currency}>{getCurrencyLabel(currency)}</span>
-              ))}
-            </div>
+            <p>Completa los datos de la oferta y luego deposita los XNO que quieres vender. La oferta se publicará automáticamente cuando Nanopaquete confirme el depósito.</p>
             <p>Si necesitas reembolsar una oferta publicada, deberás tomarla desde otro dispositivo y pagar la comisión de 0,1 XNO para que el custodio libere los fondos.</p>
           </div>
 
           {!sellerPayment && !escrowSession && (
-            <div className="deposit-start">
+            <form className="stack-form publish-form deposit-start" onSubmit={handleStartSellerPayment}>
               <label>
                 Custodio
                 <select
@@ -1031,11 +1029,64 @@ export function Nanopaquete() {
                   ))}
                 </select>
               </label>
-              <button className="primary-button create-offer-button" type="button" onClick={handleStartSellerPayment} disabled={loading === 'start-payment' || !selectedCustodianId}>
+              <label>
+                Activo a recibir
+                <select
+                  value={sellerForm.currency}
+                  onChange={(event) => updateSellerForm('currency', event.target.value as Currency)}
+                >
+                  {currencies.map((currency) => (
+                    <option key={currency} value={currency}>{getCurrencyLabel(currency)}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Precio esperado
+                <input
+                  placeholder="Ej. 180000"
+                  value={sellerForm.price}
+                  onChange={(event) => updateSellerForm('price', event.target.value)}
+                  required
+                />
+              </label>
+              <label>
+                Pais del contacto
+                <select
+                  value={sellerForm.sellerCountry}
+                  onChange={(event) => {
+                    const selected = contactCountries.find((item) => item.country === event.target.value)
+                    updateSellerForm('sellerCountry', event.target.value)
+                    updateSellerForm('sellerDialCode', selected?.dialCode ?? '')
+                  }}
+                >
+                  {contactCountries.map((item) => (
+                    <option key={item.country} value={item.country}>{item.country}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Extension internacional
+                <input
+                  placeholder="+57"
+                  value={sellerForm.sellerDialCode}
+                  onChange={(event) => updateSellerForm('sellerDialCode', event.target.value)}
+                  required
+                />
+              </label>
+              <label>
+                Contacto
+                <input
+                  placeholder="Ej. 3120000000"
+                  value={sellerForm.sellerContact}
+                  onChange={(event) => updateSellerForm('sellerContact', event.target.value)}
+                  required
+                />
+              </label>
+              <button className="primary-button create-offer-button" type="submit" disabled={loading === 'start-payment' || !selectedCustodianId}>
                 <Wallet size={18} />
-                Crear oferta
+                Guardar y pagar
               </button>
-            </div>
+            </form>
           )}
 
           {sellerPayment && (
@@ -1099,72 +1150,6 @@ export function Nanopaquete() {
             </div>
           )}
 
-          {escrowSession && (
-            <form className="stack-form publish-form" onSubmit={handlePublishSubmit}>
-              <label>
-                Activo a recibir
-                <select
-                  value={sellerForm.currency}
-                  onChange={(event) => updateSellerForm('currency', event.target.value as Currency)}
-                >
-                  {currencies.map((currency) => (
-                    <option key={currency} value={currency}>{getCurrencyLabel(currency)}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Precio esperado
-                <input
-                  placeholder="Ej. 180000"
-                  value={sellerForm.price}
-                  onChange={(event) => updateSellerForm('price', event.target.value)}
-                  required
-                />
-              </label>
-              <label>
-                Pais del contacto
-                <select
-                  value={sellerForm.sellerCountry}
-                  onChange={(event) => {
-                    const selected = contactCountries.find((item) => item.country === event.target.value)
-                    updateSellerForm('sellerCountry', event.target.value)
-                    updateSellerForm('sellerDialCode', selected?.dialCode ?? '')
-                  }}
-                >
-                  {contactCountries.map((item) => (
-                    <option key={item.country} value={item.country}>{item.country}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Extension internacional
-                <input
-                  placeholder="+57"
-                  value={sellerForm.sellerDialCode}
-                  onChange={(event) => updateSellerForm('sellerDialCode', event.target.value)}
-                  required
-                />
-              </label>
-              <label>
-                Contacto
-                <input
-                  placeholder="Ej. 3120000000"
-                  value={sellerForm.sellerContact}
-                  onChange={(event) => updateSellerForm('sellerContact', event.target.value)}
-                  required
-                />
-              </label>
-              <button className="primary-button" type="submit" disabled={loading === 'publish'}>
-                Publicar oferta
-              </button>
-            </form>
-          )}
-
-          {publishedOffer && (
-            <div className="status-message success">
-              Oferta publicada. Codigo privado del vendedor: <strong>{publishedOffer.sellerPrivateCode}</strong>
-            </div>
-          )}
         </div>
         )}
 
