@@ -229,6 +229,20 @@ const publicOffer = (offer: OfferRecord) => ({
   createdAt: offer.createdAt,
 })
 
+const escrowSessionResponse = (escrow: EscrowRecord) => ({
+  escrowId: escrow.id,
+  publishToken: escrow.publishToken,
+  amountXno: escrow.amountXno,
+  sellerWallet: escrow.sellerWallet,
+  paymentHash: escrow.paymentHash,
+  custodianContact,
+  escrowWallet,
+  custodyFeeXno,
+})
+
+const findRecoverableEscrow = (store: Store) =>
+  store.escrows.find((escrow) => escrow.status === 'PENDING')
+
 const statusLabel = (status: OfferStatus) =>
   ({
     ACTIVE: 'Activa',
@@ -355,16 +369,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
         sendJson(response, 409, { error: 'El pago fue verificado, pero falta la custodia asociada.' })
         return
       }
-      sendJson(response, 200, {
-        escrowId: escrow.id,
-        publishToken: escrow.publishToken,
-        amountXno: escrow.amountXno,
-        sellerWallet: escrow.sellerWallet,
-        paymentHash: escrow.paymentHash,
-        custodianContact,
-        escrowWallet,
-        custodyFeeXno,
-      })
+      sendJson(response, 200, escrowSessionResponse(escrow))
       return
     }
 
@@ -407,17 +412,15 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       store.usedPayments.push({ hash: payment.hash, purpose: 'seller_deposit', createdAt: new Date().toISOString() })
       await writeStore(store)
 
-      sendJson(response, 200, {
-        escrowId: escrow.id,
-        publishToken: escrow.publishToken,
-        amountXno: escrow.amountXno,
-        sellerWallet: escrow.sellerWallet,
-        paymentHash: escrow.paymentHash,
-        custodianContact,
-        escrowWallet,
-        custodyFeeXno,
-      })
+      sendJson(response, 200, escrowSessionResponse(escrow))
     } catch (error) {
+      const recoverableEscrow = findRecoverableEscrow(store)
+
+      if (recoverableEscrow) {
+        sendJson(response, 200, escrowSessionResponse(recoverableEscrow))
+        return
+      }
+
       sendJson(response, 422, { error: error instanceof Error ? error.message : 'No se pudo validar el deposito.' })
     }
     return
