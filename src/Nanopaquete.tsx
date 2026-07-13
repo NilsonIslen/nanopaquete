@@ -415,11 +415,7 @@ export function Nanopaquete() {
 
       <section className="intro-band compact-intro-band">
         <div className="flow-grid custodian-auth-row" aria-label="Autenticacion de custodios">
-          <button className="ghost-button" type="button" onClick={handleStartCustodianAuth} disabled={loading === 'custodian-auth-start'}>
-            <ShieldCheck size={18} />
-            Acceso custodio autorizado
-          </button>
-          {custodianSession && (
+          {custodianSession ? (
             <span className="custodian-session-pill">
               Custodio autenticado: {custodianSession.custodianName}
               <button type="button" onClick={() => void handleCloseCustodianSession()}>
@@ -427,6 +423,11 @@ export function Nanopaquete() {
                 Cerrar sesion
               </button>
             </span>
+          ) : (
+            <button className="ghost-button" type="button" onClick={handleStartCustodianAuth} disabled={loading === 'custodian-auth-start'}>
+              <ShieldCheck size={18} />
+              Acceso custodio autorizado
+            </button>
           )}
         </div>
         {custodianAuthIntent && (
