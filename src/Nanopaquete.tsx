@@ -124,7 +124,7 @@ export function Nanopaquete() {
       .then(([offersResponse, negotiationResponse]) => {
         if (ignore) return
         setOffers(offersResponse.offers)
-        if (negotiationResponse.negotiation) setTakenOffer(negotiationResponse.negotiation)
+        setTakenOffer(negotiationResponse.negotiation)
       })
       .catch((requestError) => {
         if (!ignore) {
@@ -637,14 +637,16 @@ export function Nanopaquete() {
                 <dt>Oferta tomada</dt>
                 <dd>{takenOffer.offer.amountXno} XNO por {takenOffer.offer.price} {takenOffer.offer.currency}</dd>
               </dl>
-              <button
-                className="ghost-button danger-button"
-                type="button"
-                onClick={handleCancelTakenOffer}
-                disabled={loading === 'cancel-take'}
-              >
-                Cancelar proceso
-              </button>
+              {takenOffer.offer.status === 'NEGOTIATION' && (
+                <button
+                  className="ghost-button danger-button"
+                  type="button"
+                  onClick={handleCancelTakenOffer}
+                  disabled={loading === 'cancel-take'}
+                >
+                  Cancelar proceso
+                </button>
+              )}
             </div>
           )}
         </div>
