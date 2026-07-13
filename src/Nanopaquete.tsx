@@ -649,8 +649,8 @@ export function Nanopaquete() {
         </section>
       )}
 
-      {(activeView === 'offers' || activeView === 'create-offer' || activeView === 'custodian-auth') && (
-      <section className={activeView === 'offers' || activeView === 'custodian-auth' ? 'work-grid offers-only' : 'work-grid'}>
+      {(activeView === 'offers' || activeView === 'create-offer') && (
+      <section className={activeView === 'offers' ? 'work-grid offers-only' : 'work-grid'}>
         {activeView === 'create-offer' && (
         <div className="panel seller-panel">
           <div className="panel-heading">
@@ -811,7 +811,7 @@ export function Nanopaquete() {
         </div>
         )}
 
-        {(activeView === 'offers' || activeView === 'custodian-auth') && (
+        {activeView === 'offers' && (
         <div className="panel offers-panel">
           <div className="panel-heading inline-heading">
             <div>
