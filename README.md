@@ -29,6 +29,7 @@ npm run lint
 
 - `VITE_NANOPAQUETE_API_URL`: URL del backend. En local usa `http://localhost:8789/api`.
 - `NANOPAQUETE_API_PORT`: puerto API, por defecto `8789`.
+- Custodio por defecto: `Nilson Islen Castrillon`.
 - `NANOPAQUETE_ESCROW_WALLET`: wallet Nano del primer custodio. Por defecto usa `nano_1j7csyciamkzktswyxey5yt6f1rg1zbw3rtioe7xdze4fekkbo7zxri3ijxd`.
 - `NANOPAQUETE_CUSTODIAN_CONTACT`: contacto privado del primer custodio. Por defecto usa `+57 3008188284`.
 - `NANOPAQUETE_CUSTODIANS_JSON`: lista JSON opcional para multiples custodios, con campos `id`, `name`, `wallet` y `contact`. Por ahora Nanopaquete usa el primer custodio valido de la lista.

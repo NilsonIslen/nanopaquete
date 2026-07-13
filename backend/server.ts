@@ -80,7 +80,7 @@ type Custodian = {
 const defaultCustodians: Custodian[] = [
   {
     id: 'colombia-1',
-    name: 'Custodio Colombia 1',
+    name: 'Nilson Islen Castrillon',
     wallet:
       process.env.NANOPAQUETE_ESCROW_WALLET ??
       'nano_1j7csyciamkzktswyxey5yt6f1rg1zbw3rtioe7xdze4fekkbo7zxri3ijxd',
