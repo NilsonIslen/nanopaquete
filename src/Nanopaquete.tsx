@@ -543,9 +543,9 @@ export function Nanopaquete() {
               <p>
                 Transfiere a la cuenta de custodia la cantidad exacta de XNO que quieres vender.
               </p>
-              <button className="primary-button" type="button" onClick={handleStartSellerPayment} disabled={loading === 'start-payment' || !selectedCustodianId}>
+              <button className="primary-button create-offer-button" type="button" onClick={handleStartSellerPayment} disabled={loading === 'start-payment' || !selectedCustodianId}>
                 <Wallet size={18} />
-                Iniciar deposito
+                Crear oferta
               </button>
             </div>
           )}

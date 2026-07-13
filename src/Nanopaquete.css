@@ -607,3 +607,11 @@ dd {
 .auth-panel-band {
   align-items: start;
 }
+
+.create-offer-button {
+  background: #1f5f8f;
+}
+
+.create-offer-button:hover:not(:disabled) {
+  background: #184f78;
+}
