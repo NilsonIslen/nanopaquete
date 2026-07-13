@@ -241,8 +241,8 @@ export function Nanopaquete() {
     <main className="app-shell">
       <header className="topbar">
         <div>
-          <p className="eyebrow">Custodia de Nano para comercio P2P</p>
           <h1>Nanopaquete</h1>
+          <p className="topbar-subtitle">Custodia de Nano para comercio P2P</p>
         </div>
         <button className="ghost-button" type="button" onClick={loadOffers} disabled={loading === 'offers'}>
           <RefreshCw size={18} />
@@ -301,10 +301,6 @@ export function Nanopaquete() {
                   <Copy size={16} />
                   Copiar wallet
                 </button>
-                <button className="ghost-button danger-button" type="button" onClick={handleCancelSellerPayment}>
-                  <X size={16} />
-                  Cancelar
-                </button>
               </div>
               <div className="payment-qr" aria-label="QR de pago Nano">
                 <QRCodeSVG value={sellerPayment.paymentUri} size={176} marginSize={2} />
@@ -321,6 +317,10 @@ export function Nanopaquete() {
               </dl>
               <button className="primary-button" type="button" onClick={handleVerifySellerPayment} disabled={loading === 'verify-payment'}>
                 Verificar deposito
+              </button>
+              <button className="ghost-button danger-button" type="button" onClick={handleCancelSellerPayment}>
+                <X size={16} />
+                Cancelar
               </button>
             </div>
           )}

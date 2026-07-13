@@ -463,3 +463,9 @@ dd {
   background: #fdecea;
   border-color: #f4c8c3;
 }
+
+.topbar-subtitle {
+  margin-top: 4px;
+  color: #526255;
+  font-weight: 800;
+}
