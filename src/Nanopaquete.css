@@ -479,3 +479,25 @@ dd {
 .compact-intro-band .flow-grid {
   justify-content: start;
 }
+
+.offer-status-pill {
+  min-height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  padding: 0 14px;
+  background: #fff7df;
+  color: #6c4c00;
+  font-weight: 900;
+}
+
+.release-fee-box {
+  border-color: #d9a21b;
+  background: #fffaf0;
+}
+
+.release-fee-box > p:not(.eyebrow) {
+  color: #4f3b0b;
+  line-height: 1.5;
+}

@@ -10,10 +10,12 @@ App experimental para comprar y vender XNO con custodia manual.
 4. Publica una oferta con la cantidad detectada, divisa, precio y contacto privado.
 5. La oferta aparece publica sin mostrar el contacto del vendedor.
 6. Un comprador toma la oferta, registra su wallet Nano receptora y recibe el contacto del vendedor.
-7. La oferta pasa a negociacion y deja de estar visible como oferta publica.
+7. La oferta pasa a negociacion y sigue visible con su estado.
 8. Los fondos solo deben liberarse a la wallet registrada por el comprador.
-9. Para liberar, el vendedor paga la comision de custodia de 0.1 XNO y coordina con el custodio.
-10. Si hay disputa, el custodio revisa el caso y decide mantener bloqueado, cancelar o liberar.
+9. Para confirmar que recibio el pago, el vendedor usa el boton Liberar fondos y paga la comision de custodia de 0.1 XNO desde la wallet que publico la oferta.
+10. Cuando Nanopaquete detecta esa comision, la oferta pasa a estado liberando.
+11. El custodio solo debe liberar fondos hacia la wallet del comprador cuando la oferta esta en estado liberando.
+12. Si hay disputa, el custodio revisa el caso y decide mantener bloqueado, cancelar o liberar segun corresponda.
 
 ## Comandos
 

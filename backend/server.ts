@@ -4,12 +4,12 @@ import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { findAnyIncomingPayment, isNanoAddress } from './nano-rpc'
+import { findAnyIncomingPayment, findIncomingPaymentBySenderAmount, isNanoAddress, nanoToRaw } from './nano-rpc'
 
 const currencies = ['COP', 'USD', 'BTC', 'EUR'] as const
 
 type Currency = (typeof currencies)[number]
-type OfferStatus = 'ACTIVE' | 'NEGOTIATION' | 'RELEASED' | 'CANCELLED' | 'DISPUTED'
+type OfferStatus = 'ACTIVE' | 'NEGOTIATION' | 'RELEASING' | 'RELEASED' | 'CANCELLED' | 'DISPUTED'
 
 type SellerPaymentIntent = {
   id: string
@@ -54,18 +54,35 @@ type OfferRecord = {
   status: OfferStatus
   createdAt: string
   takenAt?: string
+  releaseFeeIntentId?: string
+  releaseFeeHash?: string
+  releaseRequestedAt?: string
   closedAt?: string
   adminNote?: string
 }
 
 type UsedPayment = {
   hash: string
-  purpose: 'seller_deposit'
+  purpose: 'seller_deposit' | 'release_fee'
   createdAt: string
+}
+
+type ReleaseFeeIntent = {
+  id: string
+  offerId: string
+  senderWallet: string
+  receiverAddress: string
+  amountXno: string
+  paymentUri: string
+  status: 'PENDING' | 'VERIFIED' | 'EXPIRED'
+  createdAt: string
+  expiresAt: string
+  paymentHash?: string
 }
 
 type Store = {
   sellerPaymentIntents: SellerPaymentIntent[]
+  releaseFeeIntents: ReleaseFeeIntent[]
   escrows: EscrowRecord[]
   offers: OfferRecord[]
   usedPayments: UsedPayment[]
@@ -118,6 +135,7 @@ const escrowWallet = activeCustodian.wallet
 const custodianContact = activeCustodian.contact
 const custodyFeeXno = process.env.NANOPAQUETE_CUSTODY_FEE_XNO ?? '0.1'
 const sellerPaymentTtlMs = Number(process.env.NANOPAQUETE_SELLER_PAYMENT_TTL_MS ?? 60 * 60 * 1000)
+const releaseFeeTtlMs = Number(process.env.NANOPAQUETE_RELEASE_FEE_TTL_MS ?? 60 * 60 * 1000)
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const storePath = join(__dirname, 'data', 'nanopaquete.json')
 
@@ -199,12 +217,13 @@ const readStore = async (): Promise<Store> => {
 
     return {
       sellerPaymentIntents: Array.isArray(parsed.sellerPaymentIntents) ? parsed.sellerPaymentIntents : [],
+      releaseFeeIntents: Array.isArray(parsed.releaseFeeIntents) ? parsed.releaseFeeIntents : [],
       escrows: Array.isArray(parsed.escrows) ? parsed.escrows : [],
       offers: Array.isArray(parsed.offers) ? parsed.offers : [],
       usedPayments: Array.isArray(parsed.usedPayments) ? parsed.usedPayments : [],
     }
   } catch {
-    return { sellerPaymentIntents: [], escrows: [], offers: [], usedPayments: [] }
+    return { sellerPaymentIntents: [], releaseFeeIntents: [], escrows: [], offers: [], usedPayments: [] }
   }
 }
 
@@ -224,7 +243,8 @@ const createCode = (digits: number) => {
   return String(min + (randomBytes(4).readUInt32BE(0) % range))
 }
 
-const createNanoPaymentUri = (receiver: string) => `nano:${receiver}`
+const createNanoPaymentUri = (receiver: string, amountXno?: string) =>
+  amountXno ? `nano:${receiver}?amount=${nanoToRaw(amountXno)}` : `nano:${receiver}`
 
 const publicOffer = (offer: OfferRecord) => ({
   id: offer.id,
@@ -264,6 +284,7 @@ const statusLabel = (status: OfferStatus) =>
   ({
     ACTIVE: 'Activa',
     NEGOTIATION: 'En negociacion',
+    RELEASING: 'Liberando',
     RELEASED: 'Liberada',
     CANCELLED: 'Cancelada',
     DISPUTED: 'En disputa',
@@ -311,13 +332,15 @@ const renderAdmin = (offers: OfferRecord[]) => `<!doctype html>
               <dt>Hash deposito</dt><dd>${escapeHtml(offer.paymentHash)}</dd>
               <dt>Wallet comprador</dt><dd>${escapeHtml(offer.buyerNanoAddress)}</dd>
               <dt>Sesion comprador</dt><dd>${escapeHtml(offer.buyerSessionId)}</dd>
+              <dt>Hash comision liberacion</dt><dd>${escapeHtml(offer.releaseFeeHash)}</dd>
               <dt>Creada</dt><dd>${escapeHtml(offer.createdAt)}</dd>
               <dt>Tomada</dt><dd>${escapeHtml(offer.takenAt)}</dd>
+              <dt>Solicito liberacion</dt><dd>${escapeHtml(offer.releaseRequestedAt)}</dd>
               <dt>Nota admin</dt><dd>${escapeHtml(offer.adminNote)}</dd>
             </dl>
             <form method="post" action="/admin/offers/${encodeURIComponent(offer.id)}/status">
               <select name="status">
-                ${(['ACTIVE', 'NEGOTIATION', 'DISPUTED', 'CANCELLED', 'RELEASED'] as OfferStatus[])
+                ${(['ACTIVE', 'NEGOTIATION', 'RELEASING', 'DISPUTED', 'CANCELLED', 'RELEASED'] as OfferStatus[])
                   .map((status) => `<option value="${status}" ${status === offer.status ? 'selected' : ''}>${statusLabel(status)}</option>`)
                   .join('')}
               </select>
@@ -339,7 +362,11 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
 
   if (request.method === 'GET' && url.pathname === '/api/offers') {
     const store = await readStore()
-    sendJson(response, 200, { offers: store.offers.filter((offer) => offer.status === 'ACTIVE').map(publicOffer) })
+    sendJson(response, 200, {
+      offers: store.offers
+        .filter((offer) => ['ACTIVE', 'NEGOTIATION', 'RELEASING'].includes(offer.status))
+        .map(publicOffer),
+    })
     return
   }
 
@@ -347,7 +374,8 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     const clientSessionId = normalizeClientSessionId(url.searchParams.get('clientSessionId'))
     const store = await readStore()
     const offer = store.offers.find(
-      (item) => item.status === 'NEGOTIATION' && item.buyerSessionId === clientSessionId,
+      (item) =>
+        ['NEGOTIATION', 'RELEASING'].includes(item.status) && item.buyerSessionId === clientSessionId,
     )
 
     sendJson(response, 200, { negotiation: offer ? takenOfferResponse(offer) : null })
@@ -561,7 +589,8 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     }
 
     const currentNegotiation = store.offers.find(
-      (item) => item.status === 'NEGOTIATION' && item.buyerSessionId === clientSessionId,
+      (item) =>
+        ['NEGOTIATION', 'RELEASING'].includes(item.status) && item.buyerSessionId === clientSessionId,
     )
 
     if (currentNegotiation) {
@@ -613,6 +642,121 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     return
   }
 
+  const releaseIntentMatch = url.pathname.match(/^\/api\/offers\/([^/]+)\/release-intents$/)
+
+  if (request.method === 'POST' && releaseIntentMatch) {
+    const offerId = decodeURIComponent(releaseIntentMatch[1])
+    const store = await readStore()
+    const offer = store.offers.find((item) => item.id === offerId)
+
+    if (!offer) {
+      sendJson(response, 404, { error: 'La oferta no existe.' })
+      return
+    }
+
+    if (offer.status !== 'NEGOTIATION') {
+      sendJson(response, 409, { error: 'Solo se puede liberar una oferta en negociacion.' })
+      return
+    }
+
+    if (!offer.sellerWallet) {
+      sendJson(response, 409, { error: 'Esta oferta no tiene wallet vendedora asociada.' })
+      return
+    }
+
+    const now = Date.now()
+    store.releaseFeeIntents = store.releaseFeeIntents.filter(
+      (intent) => intent.status !== 'PENDING' || new Date(intent.expiresAt).getTime() > now,
+    )
+    const existing = store.releaseFeeIntents.find(
+      (intent) => intent.offerId === offer.id && intent.status === 'PENDING',
+    )
+
+    if (existing) {
+      sendJson(response, 200, existing)
+      return
+    }
+
+    const intent: ReleaseFeeIntent = {
+      id: `rel_${randomUUID().replaceAll('-', '').slice(0, 18)}`,
+      offerId: offer.id,
+      senderWallet: offer.sellerWallet,
+      receiverAddress: escrowWallet,
+      amountXno: custodyFeeXno,
+      paymentUri: createNanoPaymentUri(escrowWallet, custodyFeeXno),
+      status: 'PENDING',
+      createdAt: new Date(now).toISOString(),
+      expiresAt: new Date(now + releaseFeeTtlMs).toISOString(),
+    }
+
+    store.releaseFeeIntents.push(intent)
+    offer.releaseFeeIntentId = intent.id
+    await writeStore(store)
+    sendJson(response, 201, intent)
+    return
+  }
+
+  const verifyReleaseIntentMatch = url.pathname.match(/^\/api\/release-intents\/([^/]+)\/verify$/)
+
+  if (request.method === 'POST' && verifyReleaseIntentMatch) {
+    const intentId = decodeURIComponent(verifyReleaseIntentMatch[1])
+    const store = await readStore()
+    const intent = store.releaseFeeIntents.find((item) => item.id === intentId)
+
+    if (!intent) {
+      sendJson(response, 404, { error: 'Solicitud de liberacion no encontrada.' })
+      return
+    }
+
+    const offer = store.offers.find((item) => item.id === intent.offerId)
+
+    if (!offer) {
+      sendJson(response, 404, { error: 'La oferta no existe.' })
+      return
+    }
+
+    if (offer.status === 'RELEASING') {
+      sendJson(response, 200, { offer: publicOffer(offer), paymentHash: offer.releaseFeeHash })
+      return
+    }
+
+    if (offer.status !== 'NEGOTIATION') {
+      sendJson(response, 409, { error: 'Esta oferta ya no esta en negociacion.' })
+      return
+    }
+
+    if (new Date(intent.expiresAt).getTime() <= Date.now()) {
+      intent.status = 'EXPIRED'
+      await writeStore(store)
+      sendJson(response, 410, { error: 'La solicitud de liberacion vencio. Inicia una nueva.' })
+      return
+    }
+
+    try {
+      const payment = await findIncomingPaymentBySenderAmount({
+        receiverWallet: intent.receiverAddress,
+        senderWallet: intent.senderWallet,
+        amountNano: intent.amountXno,
+        createdAfter: intent.createdAt,
+        excludedHashes: store.usedPayments.map((item) => item.hash),
+      })
+
+      intent.status = 'VERIFIED'
+      intent.paymentHash = payment.hash
+      offer.status = 'RELEASING'
+      offer.releaseFeeHash = payment.hash
+      offer.releaseRequestedAt = new Date().toISOString()
+      store.usedPayments.push({ hash: payment.hash, purpose: 'release_fee', createdAt: new Date().toISOString() })
+      await writeStore(store)
+      sendJson(response, 200, { offer: publicOffer(offer), paymentHash: payment.hash })
+    } catch (error) {
+      sendJson(response, 422, {
+        error: error instanceof Error ? error.message : 'No se pudo validar la comision de liberacion.',
+      })
+    }
+    return
+  }
+
   sendJson(response, 404, { error: 'Ruta no encontrada.' })
 }
 
@@ -646,6 +790,11 @@ const handleAdmin = async (request: IncomingMessage, response: ServerResponse, u
 
     if (!offer) {
       sendJson(response, 404, { error: 'Oferta no encontrada.' })
+      return
+    }
+
+    if (nextStatus === 'RELEASED' && offer.status !== 'RELEASING') {
+      sendJson(response, 409, { error: 'Solo se puede liberar una oferta en estado liberando.' })
       return
     }
 

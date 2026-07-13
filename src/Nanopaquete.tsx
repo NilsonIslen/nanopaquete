@@ -6,13 +6,16 @@ import {
   getBuyerNegotiation,
   getOffers,
   publishOffer,
+  startReleaseFee,
   startSellerPayment,
   takeOffer,
+  verifyReleaseFee,
   verifySellerPayment,
   type Currency,
   type EscrowSession,
   type PublicOffer,
   type PublishedOffer,
+  type ReleaseFeeIntent,
   type SellerPaymentIntent,
   type TakenOffer,
 } from './api'
@@ -93,6 +96,7 @@ export function Nanopaquete() {
   const [selectedOffer, setSelectedOffer] = useState<PublicOffer | null>(null)
   const [buyerNanoAddress, setBuyerNanoAddress] = useState('')
   const [takenOffer, setTakenOffer] = useState<TakenOffer | null>(getStoredTakenOffer)
+  const [releaseFeeIntent, setReleaseFeeIntent] = useState<ReleaseFeeIntent | null>(null)
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [clientSessionId] = useState(getClientSessionId)
@@ -235,6 +239,36 @@ export function Nanopaquete() {
       await loadOffers()
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'No se pudo tomar la oferta.')
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  const handleStartReleaseFee = async (offerId: string) => {
+    setError(null)
+    setLoading(`release-start:${offerId}`)
+
+    try {
+      const intent = await startReleaseFee(offerId)
+      setReleaseFeeIntent(intent)
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'No se pudo iniciar la liberacion.')
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  const handleVerifyReleaseFee = async () => {
+    if (!releaseFeeIntent) return
+    setError(null)
+    setLoading('release-verify')
+
+    try {
+      await verifyReleaseFee(releaseFeeIntent.id)
+      setReleaseFeeIntent(null)
+      await loadOffers()
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'No se pudo validar la comision de liberacion.')
     } finally {
       setLoading(null)
     }
@@ -437,7 +471,7 @@ export function Nanopaquete() {
             <div>
               <h2>Ofertas disponibles</h2>
             </div>
-            <span>{offers.length} activas</span>
+            <span>{offers.length} visibles</span>
           </div>
 
           <div className="offer-list">
@@ -449,9 +483,22 @@ export function Nanopaquete() {
                   <div>
                     <p className="offer-amount">{offer.amountXno} XNO</p>
                     <p>{offer.price} {offer.currency}</p>
+                    <small>Estado: {offer.status === 'ACTIVE' ? 'Activa' : offer.status === 'NEGOTIATION' ? 'En negociacion' : 'Liberando'}</small>
                     <small>Publicada {shortDate(offer.createdAt)}</small>
                   </div>
-                  {!isSelected && (
+                  {offer.status === 'NEGOTIATION' && (
+                    <button
+                      type="button"
+                      onClick={() => void handleStartReleaseFee(offer.id)}
+                      disabled={loading === `release-start:${offer.id}`}
+                    >
+                      Liberar fondos
+                    </button>
+                  )}
+                  {offer.status === 'RELEASING' && (
+                    <span className="offer-status-pill">Liberando</span>
+                  )}
+                  {!isSelected && offer.status === 'ACTIVE' && (
                     <button
                       type="button"
                       onClick={() => {
@@ -496,6 +543,42 @@ export function Nanopaquete() {
             })}
             {!offers.length && <p className="empty-state">No hay ofertas activas en este momento.</p>}
           </div>
+
+          {releaseFeeIntent && (
+            <div className="private-box release-fee-box">
+              <p className="eyebrow">Liberar fondos</p>
+              <h3>Paga {releaseFeeIntent.amountXno} XNO desde la wallet vendedora a la custodia.</h3>
+              <p>Cuando la app detecte esa transferencia, la oferta pasara a estado liberando y el custodio podra enviar los fondos a la wallet registrada por el comprador.</p>
+              <div className="payment-actions">
+                <button className="primary-button" type="button" onClick={() => openNanoPayment(releaseFeeIntent.paymentUri)}>
+                  <Wallet size={18} />
+                  Pagar comision
+                </button>
+                <button className="ghost-button" type="button" onClick={() => void copyValue(releaseFeeIntent.receiverAddress)}>
+                  <Copy size={16} />
+                  Copiar custodia
+                </button>
+              </div>
+              <div className="payment-qr" aria-label="QR de comision de liberacion">
+                <QRCodeSVG value={releaseFeeIntent.paymentUri} size={176} marginSize={2} />
+              </div>
+              <dl>
+                <dt>Desde wallet</dt>
+                <dd>{releaseFeeIntent.senderWallet}</dd>
+                <dt>Hacia custodia</dt>
+                <dd>{releaseFeeIntent.receiverAddress}</dd>
+                <dt>Monto</dt>
+                <dd>{releaseFeeIntent.amountXno} XNO</dd>
+              </dl>
+              <button className="primary-button" type="button" onClick={handleVerifyReleaseFee} disabled={loading === 'release-verify'}>
+                Verificar comision
+              </button>
+              <button className="ghost-button danger-button" type="button" onClick={() => setReleaseFeeIntent(null)}>
+                <X size={16} />
+                Cerrar
+              </button>
+            </div>
+          )}
 
           {takenOffer && (
             <div className="private-box buyer-result">

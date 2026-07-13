@@ -46,6 +46,27 @@ export const formatRawAsNano = (raw: string | undefined) => {
   return `${whole}.${fraction.toString().padStart(30, '0').replace(/0+$/, '')}`
 }
 
+const getPaymentAmountToleranceNano = () =>
+  process.env.NANO_PAYMENT_AMOUNT_TOLERANCE?.trim() || '0.000001'
+
+const getPaymentAmountToleranceRaw = () => {
+  try {
+    return BigInt(nanoToRaw(getPaymentAmountToleranceNano()))
+  } catch {
+    return BigInt(nanoToRaw('0.000001'))
+  }
+}
+
+const getRawDifference = (left: string, right: string) => {
+  const leftRaw = BigInt(left)
+  const rightRaw = BigInt(right)
+  return leftRaw > rightRaw ? leftRaw - rightRaw : rightRaw - leftRaw
+}
+
+const isAcceptedAmount = (actualRaw: string | undefined, expectedRaw: string) =>
+  /^\d+$/.test(String(actualRaw ?? '')) &&
+  getRawDifference(String(actualRaw), expectedRaw) <= getPaymentAmountToleranceRaw()
+
 export async function findAnyIncomingPayment({
   receiverWallet,
   createdAfter,
@@ -144,6 +165,103 @@ export async function findAnyIncomingPayment({
         Boolean(entry.amount) &&
         Boolean(entry.hash) &&
         Boolean(entry.account) &&
+        isNanoHash(entry.hash ?? '') &&
+        isRecentEnough(entry) &&
+        !excluded.has(normalizeNanoHash(entry.hash ?? '')),
+    )
+  }
+}
+
+export async function findIncomingPaymentBySenderAmount({
+  receiverWallet,
+  senderWallet,
+  amountNano,
+  createdAfter,
+  excludedHashes = [],
+}: {
+  receiverWallet: string
+  senderWallet: string
+  amountNano: string
+  createdAfter?: string
+  excludedHashes?: string[]
+}): Promise<IncomingPayment> {
+  const expectedRaw = nanoToRaw(amountNano)
+  const minimumTimestampMs = createdAfter ? new Date(createdAfter).getTime() : undefined
+  const excluded = new Set(excludedHashes.map(normalizeNanoHash))
+  const isRecentEnough = (entry: Record<string, unknown>) => {
+    if (!minimumTimestampMs) return true
+    const timestamp = Number(entry.local_timestamp ?? entry.timestamp)
+    if (!Number.isFinite(timestamp) || timestamp <= 0) return false
+    return timestamp * 1000 >= minimumTimestampMs
+  }
+  const getReceivableMatch = (entries: Array<[string, ReceivableEntry]>) =>
+    entries.find(
+      ([hash, entry]) =>
+        entry.source === senderWallet &&
+        isAcceptedAmount(entry.amount, expectedRaw) &&
+        isNanoHash(hash) &&
+        !excluded.has(normalizeNanoHash(hash)),
+    )
+
+  const receivable = await nanoRpc(
+    {
+      action: 'receivable',
+      account: receiverWallet,
+      count: '100',
+      source: 'true',
+      include_only_confirmed: 'true',
+    },
+    { shouldRetryWithFallback: (data) => !getReceivableMatch(getReceivableEntries(data)) },
+  )
+  const pendingPayment = getReceivableMatch(getReceivableEntries(receivable))
+
+  if (pendingPayment) {
+    const [hash, entry] = pendingPayment
+    const block = await getNanoBlockInfo(hash)
+    if (isRecentEnough(block)) {
+      const issue = getIncomingPaymentIssue(block, { senderWallet, receiverWallet })
+      if (issue) throw new Error(issue)
+      return {
+        hash: normalizeNanoHash(hash),
+        senderWallet,
+        amountNano: formatRawAsNano(entry.amount),
+      }
+    }
+  }
+
+  const data = await nanoRpc(
+    {
+      action: 'account_history',
+      account: receiverWallet,
+      count: '100',
+      raw: 'true',
+    },
+    { shouldRetryWithFallback: (history) => !Array.isArray(history.history) || !getReceiveMatch(history.history) },
+  )
+
+  if (!Array.isArray(data.history)) {
+    throw new Error('No encontre movimientos recientes en la cuenta de custodia.')
+  }
+
+  const payment = getReceiveMatch(data.history)
+  if (!payment?.hash || !payment.account || !payment.amount) {
+    throw new Error(`No encontre un pago confirmado de ${amountNano} XNO desde la wallet vendedora hacia la custodia.`)
+  }
+
+  return {
+    hash: normalizeNanoHash(payment.hash),
+    senderWallet: payment.account,
+    amountNano: formatRawAsNano(payment.amount),
+  }
+
+  function getReceiveMatch(history: HistoryEntry[]) {
+    return history.find(
+      (entry) =>
+        getBlockType(entry) === 'receive' &&
+        entry.confirmed === 'true' &&
+        entry.account === senderWallet &&
+        isAcceptedAmount(entry.amount, expectedRaw) &&
+        Boolean(entry.hash) &&
         isNanoHash(entry.hash ?? '') &&
         isRecentEnough(entry) &&
         !excluded.has(normalizeNanoHash(entry.hash ?? '')),

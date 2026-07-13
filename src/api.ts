@@ -4,7 +4,7 @@ export const nanopaqueteApiUrl =
   import.meta.env.VITE_NANOPAQUETE_API_URL?.trim() || defaultApiUrl
 
 export type Currency = 'COP' | 'USD' | 'BTC' | 'EUR'
-export type OfferStatus = 'ACTIVE' | 'NEGOTIATION' | 'RELEASED' | 'CANCELLED' | 'DISPUTED'
+export type OfferStatus = 'ACTIVE' | 'NEGOTIATION' | 'RELEASING' | 'RELEASED' | 'CANCELLED' | 'DISPUTED'
 
 export type PublicOffer = {
   id: string
@@ -61,6 +61,18 @@ export type TakenOffer = {
   sellerContact: string
   sellerCountry?: string
   sellerDialCode?: string
+}
+
+export type ReleaseFeeIntent = {
+  id: string
+  offerId: string
+  senderWallet: string
+  receiverAddress: string
+  amountXno: string
+  paymentUri: string
+  status: 'PENDING' | 'VERIFIED' | 'EXPIRED'
+  createdAt: string
+  expiresAt: string
 }
 
 async function requestJson<T>(path: string, options?: RequestInit): Promise<T> {
@@ -122,4 +134,16 @@ export const cancelTakenOffer = (offerId: string, clientSessionId: string) =>
   requestJson<{ offer: PublicOffer }>(`/offers/${encodeURIComponent(offerId)}/cancel-take`, {
     method: 'POST',
     body: JSON.stringify({ clientSessionId }),
+  })
+
+export const startReleaseFee = (offerId: string) =>
+  requestJson<ReleaseFeeIntent>(`/offers/${encodeURIComponent(offerId)}/release-intents`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  })
+
+export const verifyReleaseFee = (intentId: string) =>
+  requestJson<{ offer: PublicOffer; paymentHash?: string }>(`/release-intents/${encodeURIComponent(intentId)}/verify`, {
+    method: 'POST',
+    body: JSON.stringify({}),
   })
