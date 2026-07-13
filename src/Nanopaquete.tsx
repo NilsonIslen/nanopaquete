@@ -630,7 +630,7 @@ export function Nanopaquete() {
                 />
               </label>
               <label>
-                Contacto privado
+                Contacto
                 <input
                   placeholder="Ej. 3120000000"
                   value={sellerForm.sellerContact}
@@ -809,7 +809,7 @@ export function Nanopaquete() {
                         />
                       </label>
                       <label>
-                        Contacto privado
+                        Contacto
                         <input
                           placeholder="Ej. 3120000000"
                           value={buyerForm.contact}
