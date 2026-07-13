@@ -83,7 +83,8 @@ const getClientSessionId = () => {
 const getStoredSellerPayment = () => {
   try {
     const value = window.localStorage.getItem(sellerPaymentStorageKey)
-    return value ? (JSON.parse(value) as SellerPaymentIntent) : null
+    const payment = value ? (JSON.parse(value) as SellerPaymentIntent) : null
+    return payment && new Date(payment.expiresAt).getTime() > Date.now() ? payment : null
   } catch {
     return null
   }
@@ -735,6 +736,8 @@ export function Nanopaquete() {
                 <QRCodeSVG value={sellerPayment.paymentUri} size={176} marginSize={2} />
               </div>
               <dl>
+                <dt>Custodio seleccionado</dt>
+                <dd>{sellerPayment.custodianName}</dd>
                 <dt>Wallet custodia</dt>
                 <dd>{sellerPayment.receiverAddress}</dd>
                 <dt>Sesion local</dt>
@@ -749,7 +752,7 @@ export function Nanopaquete() {
               </button>
               <button className="ghost-button danger-button" type="button" onClick={handleCancelSellerPayment}>
                 <X size={16} />
-                Cancelar
+                Cancelar y elegir otro custodio
               </button>
             </div>
           )}
