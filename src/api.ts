@@ -22,6 +22,9 @@ export type PublicOffer = {
   isOwnOffer?: boolean
   canEditPrice?: boolean
   canConfirmPayment?: boolean
+  sellerCountry?: string
+  sellerDialCode?: string
+  sellerContact?: string
   buyerCountry?: string
   buyerDialCode?: string
   buyerContact?: string

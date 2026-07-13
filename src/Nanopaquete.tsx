@@ -878,6 +878,21 @@ export function Nanopaquete() {
                       </dl>
                     </div>
                   )}
+                  {custodianSession && offer.status === 'NEGOTIATION' && offer.sellerContact && offer.buyerContact && (
+                    <div className="private-box seller-buyer-box">
+                      <p className="eyebrow">Contactos para disputa</p>
+                      <dl>
+                        <dt>Pais vendedor</dt>
+                        <dd>{offer.sellerCountry || 'No informado'}</dd>
+                        <dt>Contacto vendedor</dt>
+                        <dd>{offer.sellerDialCode ? offer.sellerDialCode + ' ' : ''}{offer.sellerContact}</dd>
+                        <dt>Pais comprador</dt>
+                        <dd>{offer.buyerCountry || 'No informado'}</dd>
+                        <dt>Contacto comprador</dt>
+                        <dd>{offer.buyerDialCode ? offer.buyerDialCode + ' ' : ''}{offer.buyerContact}</dd>
+                      </dl>
+                    </div>
+                  )}
                   {offer.status === 'RELEASING' && !offer.custodianReleaseUri && (
                     <span className="offer-status-pill">Liberando</span>
                   )}

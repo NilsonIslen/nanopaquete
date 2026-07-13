@@ -313,6 +313,16 @@ const publicOffer = (offer: OfferRecord, context: { clientSessionId?: string; cu
           buyerContact: offer.buyerContact,
         }
       : {}),
+    ...(isCustodian && offer.status === 'NEGOTIATION'
+      ? {
+          sellerCountry: offer.sellerCountry,
+          sellerDialCode: offer.sellerDialCode,
+          sellerContact: offer.sellerContact,
+          buyerCountry: offer.buyerCountry,
+          buyerDialCode: offer.buyerDialCode,
+          buyerContact: offer.buyerContact,
+        }
+      : {}),
     ...(isCustodian && offer.status === 'RELEASING' && offer.buyerNanoAddress
       ? {
           custodianReleaseUri: createNanoPaymentUri(offer.buyerNanoAddress, offer.amountXno),
