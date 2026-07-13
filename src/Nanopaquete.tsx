@@ -851,10 +851,11 @@ export function Nanopaquete() {
             <p>El custodio interviene cuando hay conflicto. En ese caso solicita comprobantes, revisa la situación y decide si libera los fondos al comprador o libera la oferta según corresponda.</p>
             <p>Cada custodio recibe 0.1 XNO por intermediación, pagados por el vendedor al confirmar que recibió el pago de su contraparte.</p>
             <p>Si un usuario pierde dinero por equivocación o mala fe de un custodio, los demás custodios deben reponer la pérdida del usuario y determinar si el custodio responsable continúa o es expulsado.</p>
-            <h3>Líder</h3>
-            <p>El líder intermedia entre custodios y desarrolladores para mantener la plataforma funcionando y en constante actualización. También incluye o expulsa custodios a nivel técnico según las solicitudes del grupo.</p>
-            <p>El líder también es custodio y tiene las mismas posibilidades de recibir ingresos que los demás custodios. Su trabajo adicional como líder es un aporte voluntario y no recibe pago extra por esa función, conservando la naturaleza de Nano: personas que aportan a la red por principios propios y convicción sobre el proyecto.</p>
-            <p>Contacto del líder: <strong>+573008188284</strong>.</p>
+            <h3>Líderes</h3>
+            <p>Puede haber uno o varios líderes. Los líderes intermedian entre custodios y desarrolladores para mantener la plataforma funcionando y en constante actualización. También incluyen o expulsan custodios a nivel técnico según las solicitudes del grupo.</p>
+            <p>Los líderes también son custodios y tienen las mismas posibilidades de recibir ingresos que los demás custodios. Su trabajo adicional como líderes es un aporte voluntario y no reciben pago extra por esa función, conservando la naturaleza de Nano: personas que aportan a la red por principios propios y convicción sobre el proyecto.</p>
+            <p>La única excepción es la autenticación de custodios: cuando un custodio inicia sesión, Nanopaquete asigna aleatoriamente una cuenta Nano de un líder para recibir 0.01 XNO. Ese monto es mínimo y representativo; su finalidad es cumplir la función técnica de autenticar custodios, no pagar una retribución adicional por liderazgo.</p>
+            <p>Contacto del líder principal: <strong>+573008188284</strong>.</p>
             <h3>Posibles disputas</h3>
             <div className="guide-disputes">
               <p><strong>El comprador no responde:</strong> el vendedor debe intentar comunicarse con el comprador para que pague o libere la oferta. Si pasan 24 horas sin respuesta, el vendedor puede solicitar al custodio que libere la oferta para que vuelva a estar visible.</p>
