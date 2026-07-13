@@ -70,12 +70,48 @@ type Store = {
 const port = Number(process.env.NANOPAQUETE_API_PORT ?? 8789)
 const adminUser = process.env.NANOPAQUETE_ADMIN_USER ?? 'admin'
 const adminPassword = process.env.NANOPAQUETE_ADMIN_PASSWORD ?? 'nanopaquete'
-const escrowWallet =
-  process.env.NANOPAQUETE_ESCROW_WALLET ??
-  'nano_1j7csyciamkzktswyxey5yt6f1rg1zbw3rtioe7xdze4fekkbo7zxri3ijxd'
-const custodianContact =
-  process.env.NANOPAQUETE_CUSTODIAN_CONTACT ??
-  'Configura NANOPAQUETE_CUSTODIAN_CONTACT con WhatsApp o Telegram'
+type Custodian = {
+  id: string
+  name: string
+  wallet: string
+  contact: string
+}
+
+const defaultCustodians: Custodian[] = [
+  {
+    id: 'colombia-1',
+    name: 'Custodio Colombia 1',
+    wallet:
+      process.env.NANOPAQUETE_ESCROW_WALLET ??
+      'nano_1j7csyciamkzktswyxey5yt6f1rg1zbw3rtioe7xdze4fekkbo7zxri3ijxd',
+    contact: process.env.NANOPAQUETE_CUSTODIAN_CONTACT ?? '+57 3008188284',
+  },
+]
+
+const getConfiguredCustodians = () => {
+  const configured = process.env.NANOPAQUETE_CUSTODIANS_JSON?.trim()
+  if (!configured) return defaultCustodians
+
+  try {
+    const parsed = JSON.parse(configured) as Custodian[]
+    const valid = parsed.filter(
+      (custodian) =>
+        custodian.id &&
+        custodian.name &&
+        isNanoAddress(custodian.wallet) &&
+        custodian.contact,
+    )
+
+    return valid.length ? valid : defaultCustodians
+  } catch {
+    return defaultCustodians
+  }
+}
+
+const custodians = getConfiguredCustodians()
+const activeCustodian = custodians[0]
+const escrowWallet = activeCustodian.wallet
+const custodianContact = activeCustodian.contact
 const custodyFeeXno = process.env.NANOPAQUETE_CUSTODY_FEE_XNO ?? '0.1'
 const sellerPaymentTtlMs = Number(process.env.NANOPAQUETE_SELLER_PAYMENT_TTL_MS ?? 60 * 60 * 1000)
 const __dirname = dirname(fileURLToPath(import.meta.url))
