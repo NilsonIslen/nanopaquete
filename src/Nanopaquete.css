@@ -350,3 +350,55 @@ dd {
     grid-template-columns: 1fr;
   }
 }
+
+.deposit-start {
+  display: grid;
+  gap: 16px;
+  border: 1px dashed #c8d1c5;
+  border-radius: 8px;
+  padding: 18px;
+  background: #fbfcfa;
+}
+
+.deposit-start p {
+  color: #3f4f42;
+  line-height: 1.55;
+}
+
+.payment-box,
+.verified-box {
+  align-items: start;
+}
+
+.payment-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.payment-qr {
+  width: min(100%, 220px);
+  border: 1px solid #dce3da;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 16px;
+  display: grid;
+  place-items: center;
+}
+
+.payment-qr svg {
+  max-width: 100%;
+  height: auto;
+}
+
+@media (max-width: 640px) {
+  .payment-actions,
+  .payment-actions button {
+    width: 100%;
+  }
+
+  .payment-qr {
+    width: 100%;
+    box-sizing: border-box;
+  }
+}

@@ -4,18 +4,32 @@ import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { findAnyIncomingPayment, isNanoAddress } from './nano-rpc'
 
 const currencies = ['COP', 'USD', 'BTC', 'EUR'] as const
 
 type Currency = (typeof currencies)[number]
 type OfferStatus = 'ACTIVE' | 'NEGOTIATION' | 'RELEASED' | 'CANCELLED' | 'DISPUTED'
 
+type SellerPaymentIntent = {
+  id: string
+  receiverAddress: string
+  status: 'PENDING' | 'VERIFIED' | 'EXPIRED'
+  clientIp: string
+  createdAt: string
+  expiresAt: string
+  paymentHash?: string
+  senderWallet?: string
+  amountXno?: string
+}
+
 type EscrowRecord = {
   id: string
   publishToken: string
+  paymentIntentId: string
+  paymentHash: string
   amountXno: string
-  sellerWallet?: string
-  transferReference?: string
+  sellerWallet: string
   status: 'PENDING' | 'PUBLISHED'
   clientIp: string
   createdAt: string
@@ -30,7 +44,7 @@ type OfferRecord = {
   sellerContact: string
   sellerPrivateCode: string
   sellerWallet?: string
-  transferReference?: string
+  paymentHash?: string
   buyerNanoAddress?: string
   buyerCancelCode?: string
   status: OfferStatus
@@ -40,9 +54,17 @@ type OfferRecord = {
   adminNote?: string
 }
 
+type UsedPayment = {
+  hash: string
+  purpose: 'seller_deposit'
+  createdAt: string
+}
+
 type Store = {
+  sellerPaymentIntents: SellerPaymentIntent[]
   escrows: EscrowRecord[]
   offers: OfferRecord[]
+  usedPayments: UsedPayment[]
 }
 
 const port = Number(process.env.NANOPAQUETE_API_PORT ?? 8789)
@@ -50,14 +72,14 @@ const adminUser = process.env.NANOPAQUETE_ADMIN_USER ?? 'admin'
 const adminPassword = process.env.NANOPAQUETE_ADMIN_PASSWORD ?? 'nanopaquete'
 const escrowWallet =
   process.env.NANOPAQUETE_ESCROW_WALLET ??
-  'Configura NANOPAQUETE_ESCROW_WALLET con la cuenta nano de custodia'
+  'nano_1j7csyciamkzktswyxey5yt6f1rg1zbw3rtioe7xdze4fekkbo7zxri3ijxd'
 const custodianContact =
   process.env.NANOPAQUETE_CUSTODIAN_CONTACT ??
   'Configura NANOPAQUETE_CUSTODIAN_CONTACT con WhatsApp o Telegram'
 const custodyFeeXno = process.env.NANOPAQUETE_CUSTODY_FEE_XNO ?? '0.1'
+const sellerPaymentTtlMs = Number(process.env.NANOPAQUETE_SELLER_PAYMENT_TTL_MS ?? 60 * 60 * 1000)
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const storePath = join(__dirname, 'data', 'nanopaquete.json')
-const nanoAddressPattern = /^(nano|xrb)_[13][13456789abcdefghijkmnopqrstuwxyz]{59}$/
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': process.env.NANOPAQUETE_ALLOWED_ORIGIN ?? '*',
@@ -66,18 +88,12 @@ const corsHeaders = {
 }
 
 const sendJson = (response: ServerResponse, status: number, data: unknown) => {
-  response.writeHead(status, {
-    'Content-Type': 'application/json',
-    ...corsHeaders,
-  })
+  response.writeHead(status, { 'Content-Type': 'application/json', ...corsHeaders })
   response.end(JSON.stringify(data))
 }
 
 const sendHtml = (response: ServerResponse, status: number, html: string) => {
-  response.writeHead(status, {
-    'Content-Type': 'text/html; charset=utf-8',
-    ...corsHeaders,
-  })
+  response.writeHead(status, { 'Content-Type': 'text/html; charset=utf-8', ...corsHeaders })
   response.end(html)
 }
 
@@ -98,7 +114,6 @@ const constantTimeEquals = (left: string, right: string) => {
 
 const isAdminAuthorized = (request: IncomingMessage) => {
   const authorization = request.headers.authorization ?? ''
-
   if (!authorization.startsWith('Basic ')) return false
 
   const credentials = Buffer.from(authorization.slice('Basic '.length), 'base64').toString('utf8')
@@ -119,11 +134,7 @@ const requestAdminAuth = (response: ServerResponse) => {
 
 const readRequestText = async (request: IncomingMessage) => {
   const chunks: Buffer[] = []
-
-  for await (const chunk of request) {
-    chunks.push(Buffer.from(chunk))
-  }
-
+  for await (const chunk of request) chunks.push(Buffer.from(chunk))
   return Buffer.concat(chunks).toString('utf8')
 }
 
@@ -138,7 +149,6 @@ const readFormBody = async (request: IncomingMessage) => new URLSearchParams(awa
 const getClientIp = (request: IncomingMessage) => {
   const forwardedFor = request.headers['x-forwarded-for']
   const forwardedIp = Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor
-
   return forwardedIp?.split(',')[0]?.trim() || request.socket.remoteAddress || 'unknown'
 }
 
@@ -148,11 +158,13 @@ const readStore = async (): Promise<Store> => {
     const parsed = JSON.parse(content) as Partial<Store>
 
     return {
+      sellerPaymentIntents: Array.isArray(parsed.sellerPaymentIntents) ? parsed.sellerPaymentIntents : [],
       escrows: Array.isArray(parsed.escrows) ? parsed.escrows : [],
       offers: Array.isArray(parsed.offers) ? parsed.offers : [],
+      usedPayments: Array.isArray(parsed.usedPayments) ? parsed.usedPayments : [],
     }
   } catch {
-    return { escrows: [], offers: [] }
+    return { sellerPaymentIntents: [], escrows: [], offers: [], usedPayments: [] }
   }
 }
 
@@ -162,21 +174,15 @@ const writeStore = async (store: Store) => {
 }
 
 const normalizeText = (value: unknown) => String(value ?? '').trim()
-
-const isPositiveAmount = (value: string) => {
-  const amount = Number(value.replace(',', '.'))
-  return Number.isFinite(amount) && amount > 0
-}
-
 const isCurrency = (value: string): value is Currency => currencies.includes(value as Currency)
 
 const createCode = (digits: number) => {
   const min = 10 ** (digits - 1)
   const range = 9 * min
-  const number = min + (randomBytes(4).readUInt32BE(0) % range)
-
-  return String(number)
+  return String(min + (randomBytes(4).readUInt32BE(0) % range))
 }
+
+const createNanoPaymentUri = (receiver: string) => `nano:${receiver}`
 
 const publicOffer = (offer: OfferRecord) => ({
   id: offer.id,
@@ -233,7 +239,7 @@ const renderAdmin = (offers: OfferRecord[]) => `<!doctype html>
               <dt>Contacto vendedor</dt><dd>${escapeHtml(offer.sellerContact)}</dd>
               <dt>Codigo vendedor</dt><dd>${escapeHtml(offer.sellerPrivateCode)}</dd>
               <dt>Wallet vendedor</dt><dd>${escapeHtml(offer.sellerWallet)}</dd>
-              <dt>Referencia deposito</dt><dd>${escapeHtml(offer.transferReference)}</dd>
+              <dt>Hash deposito</dt><dd>${escapeHtml(offer.paymentHash)}</dd>
               <dt>Wallet comprador</dt><dd>${escapeHtml(offer.buyerNanoAddress)}</dd>
               <dt>Codigo comprador</dt><dd>${escapeHtml(offer.buyerCancelCode)}</dd>
               <dt>Creada</dt><dd>${escapeHtml(offer.createdAt)}</dd>
@@ -243,10 +249,7 @@ const renderAdmin = (offers: OfferRecord[]) => `<!doctype html>
             <form method="post" action="/admin/offers/${encodeURIComponent(offer.id)}/status">
               <select name="status">
                 ${(['ACTIVE', 'NEGOTIATION', 'DISPUTED', 'CANCELLED', 'RELEASED'] as OfferStatus[])
-                  .map(
-                    (status) =>
-                      `<option value="${status}" ${status === offer.status ? 'selected' : ''}>${statusLabel(status)}</option>`,
-                  )
+                  .map((status) => `<option value="${status}" ${status === offer.status ? 'selected' : ''}>${statusLabel(status)}</option>`)
                   .join('')}
               </select>
               <input name="adminNote" placeholder="Nota interna" value="${escapeHtml(offer.adminNote)}" />
@@ -267,50 +270,120 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
 
   if (request.method === 'GET' && url.pathname === '/api/offers') {
     const store = await readStore()
-    sendJson(response, 200, {
-      offers: store.offers.filter((offer) => offer.status === 'ACTIVE').map(publicOffer),
+    sendJson(response, 200, { offers: store.offers.filter((offer) => offer.status === 'ACTIVE').map(publicOffer) })
+    return
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/seller-payments') {
+    const store = await readStore()
+    const now = Date.now()
+    store.sellerPaymentIntents = store.sellerPaymentIntents.filter(
+      (intent) => intent.status !== 'PENDING' || new Date(intent.expiresAt).getTime() > now,
+    )
+    const intent: SellerPaymentIntent = {
+      id: `pay_${randomUUID().replaceAll('-', '').slice(0, 18)}`,
+      receiverAddress: escrowWallet,
+      status: 'PENDING',
+      clientIp: getClientIp(request),
+      createdAt: new Date(now).toISOString(),
+      expiresAt: new Date(now + sellerPaymentTtlMs).toISOString(),
+    }
+    store.sellerPaymentIntents.push(intent)
+    await writeStore(store)
+
+    sendJson(response, 201, {
+      intentId: intent.id,
+      receiverAddress: intent.receiverAddress,
+      paymentUri: createNanoPaymentUri(intent.receiverAddress),
+      expiresAt: intent.expiresAt,
+      custodianContact,
     })
     return
   }
 
-  if (request.method === 'POST' && url.pathname === '/api/escrows') {
-    const body = await readJsonBody(request)
-    const amountXno = normalizeText(body.amountXno).replace(',', '.')
-    const sellerWallet = normalizeText(body.sellerWallet)
-    const transferReference = normalizeText(body.transferReference)
+  const verifyPaymentMatch = url.pathname.match(/^\/api\/seller-payments\/([^/]+)\/verify$/)
 
-    if (!isPositiveAmount(amountXno)) {
-      sendJson(response, 400, { error: 'Ingresa una cantidad de XNO valida.' })
-      return
-    }
-
-    if (sellerWallet && !nanoAddressPattern.test(sellerWallet)) {
-      sendJson(response, 400, { error: 'La cuenta nano del vendedor no es valida.' })
-      return
-    }
-
+  if (request.method === 'POST' && verifyPaymentMatch) {
+    const intentId = decodeURIComponent(verifyPaymentMatch[1])
     const store = await readStore()
-    const escrow: EscrowRecord = {
-      id: `esc_${randomUUID().replaceAll('-', '').slice(0, 18)}`,
-      publishToken: randomUUID().replaceAll('-', ''),
-      amountXno,
-      sellerWallet: sellerWallet || undefined,
-      transferReference: transferReference || undefined,
-      status: 'PENDING',
-      clientIp: getClientIp(request),
-      createdAt: new Date().toISOString(),
+    const intent = store.sellerPaymentIntents.find((item) => item.id === intentId)
+
+    if (!intent) {
+      sendJson(response, 404, { error: 'Solicitud de deposito no encontrada.' })
+      return
     }
 
-    store.escrows.unshift(escrow)
-    await writeStore(store)
+    if (intent.status === 'VERIFIED') {
+      const escrow = store.escrows.find((item) => item.paymentIntentId === intent.id)
+      if (!escrow) {
+        sendJson(response, 409, { error: 'El pago fue verificado, pero falta la custodia asociada.' })
+        return
+      }
+      sendJson(response, 200, {
+        escrowId: escrow.id,
+        publishToken: escrow.publishToken,
+        amountXno: escrow.amountXno,
+        sellerWallet: escrow.sellerWallet,
+        paymentHash: escrow.paymentHash,
+        custodianContact,
+        escrowWallet,
+        custodyFeeXno,
+      })
+      return
+    }
 
-    sendJson(response, 201, {
-      escrowId: escrow.id,
-      publishToken: escrow.publishToken,
-      custodianContact,
-      escrowWallet,
-      custodyFeeXno,
-    })
+    if (new Date(intent.expiresAt).getTime() <= Date.now()) {
+      intent.status = 'EXPIRED'
+      await writeStore(store)
+      sendJson(response, 410, { error: 'La solicitud de deposito vencio. Inicia una nueva.' })
+      return
+    }
+
+    try {
+      const payment = await findAnyIncomingPayment({
+        receiverWallet: intent.receiverAddress,
+        createdAfter: intent.createdAt,
+        excludedHashes: store.usedPayments.map((item) => item.hash),
+      })
+
+      if (store.usedPayments.some((item) => item.hash === payment.hash)) {
+        sendJson(response, 409, { error: 'Este deposito ya fue utilizado.' })
+        return
+      }
+
+      const escrow: EscrowRecord = {
+        id: `esc_${randomUUID().replaceAll('-', '').slice(0, 18)}`,
+        publishToken: randomUUID().replaceAll('-', ''),
+        paymentIntentId: intent.id,
+        paymentHash: payment.hash,
+        amountXno: payment.amountNano,
+        sellerWallet: payment.senderWallet,
+        status: 'PENDING',
+        clientIp: intent.clientIp,
+        createdAt: new Date().toISOString(),
+      }
+
+      intent.status = 'VERIFIED'
+      intent.paymentHash = payment.hash
+      intent.senderWallet = payment.senderWallet
+      intent.amountXno = payment.amountNano
+      store.escrows.unshift(escrow)
+      store.usedPayments.push({ hash: payment.hash, purpose: 'seller_deposit', createdAt: new Date().toISOString() })
+      await writeStore(store)
+
+      sendJson(response, 200, {
+        escrowId: escrow.id,
+        publishToken: escrow.publishToken,
+        amountXno: escrow.amountXno,
+        sellerWallet: escrow.sellerWallet,
+        paymentHash: escrow.paymentHash,
+        custodianContact,
+        escrowWallet,
+        custodyFeeXno,
+      })
+    } catch (error) {
+      sendJson(response, 422, { error: error instanceof Error ? error.message : 'No se pudo validar el deposito.' })
+    }
     return
   }
 
@@ -341,7 +414,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     const escrow = store.escrows.find((item) => item.id === escrowId && item.publishToken === publishToken)
 
     if (!escrow) {
-      sendJson(response, 404, { error: 'No se encontro la custodia temporal.' })
+      sendJson(response, 404, { error: 'No se encontro la custodia verificada.' })
       return
     }
 
@@ -359,7 +432,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       sellerContact,
       sellerPrivateCode: createCode(8),
       sellerWallet: escrow.sellerWallet,
-      transferReference: escrow.transferReference,
+      paymentHash: escrow.paymentHash,
       status: 'ACTIVE',
       createdAt: new Date().toISOString(),
     }
@@ -368,12 +441,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     store.offers.unshift(offer)
     await writeStore(store)
 
-    sendJson(response, 201, {
-      offer: publicOffer(offer),
-      sellerPrivateCode: offer.sellerPrivateCode,
-      custodianContact,
-      custodyFeeXno,
-    })
+    sendJson(response, 201, { offer: publicOffer(offer), sellerPrivateCode: offer.sellerPrivateCode, custodianContact, custodyFeeXno })
     return
   }
 
@@ -384,7 +452,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     const body = await readJsonBody(request)
     const buyerNanoAddress = normalizeText(body.buyerNanoAddress)
 
-    if (!nanoAddressPattern.test(buyerNanoAddress)) {
+    if (!isNanoAddress(buyerNanoAddress)) {
       sendJson(response, 400, { error: 'Ingresa una cuenta nano valida para recibir los XNO.' })
       return
     }
@@ -441,7 +509,7 @@ const handleAdmin = async (request: IncomingMessage, response: ServerResponse, u
     const nextStatus = String(form.get('status') ?? '')
     const adminNote = String(form.get('adminNote') ?? '').trim()
 
-    if (!isCurrency('COP') || !(['ACTIVE', 'NEGOTIATION', 'DISPUTED', 'CANCELLED', 'RELEASED'] as string[]).includes(nextStatus)) {
+    if (!(['ACTIVE', 'NEGOTIATION', 'DISPUTED', 'CANCELLED', 'RELEASED'] as string[]).includes(nextStatus)) {
       sendJson(response, 400, { error: 'Estado invalido.' })
       return
     }
@@ -456,9 +524,7 @@ const handleAdmin = async (request: IncomingMessage, response: ServerResponse, u
 
     offer.status = nextStatus as OfferStatus
     offer.adminNote = adminNote || undefined
-    if (nextStatus === 'CANCELLED' || nextStatus === 'RELEASED') {
-      offer.closedAt = new Date().toISOString()
-    }
+    if (nextStatus === 'CANCELLED' || nextStatus === 'RELEASED') offer.closedAt = new Date().toISOString()
 
     await writeStore(store)
     response.writeHead(303, { Location: '/admin/offers', ...corsHeaders })

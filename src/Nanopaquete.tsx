@@ -1,14 +1,17 @@
-import { useEffect, useMemo, useState } from 'react'
-import { ArrowRight, CheckCircle2, Copy, RefreshCw, ShieldCheck } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { ArrowRight, CheckCircle2, Copy, RefreshCw, ShieldCheck, Wallet } from 'lucide-react'
+import { QRCodeSVG } from 'qrcode.react'
 import {
   getOffers,
   publishOffer,
-  registerEscrow,
+  startSellerPayment,
   takeOffer,
+  verifySellerPayment,
   type Currency,
   type EscrowSession,
   type PublicOffer,
   type PublishedOffer,
+  type SellerPaymentIntent,
   type TakenOffer,
 } from './api'
 import './Nanopaquete.css'
@@ -16,9 +19,6 @@ import './Nanopaquete.css'
 const currencies: Currency[] = ['COP', 'USD', 'BTC', 'EUR']
 
 const initialSellerForm = {
-  amountXno: '',
-  sellerWallet: '',
-  transferReference: '',
   currency: 'COP' as Currency,
   price: '',
   sellerContact: '',
@@ -30,8 +30,13 @@ const shortDate = (value: string) =>
     timeStyle: 'short',
   }).format(new Date(value))
 
+const openNanoPayment = (paymentUri: string) => {
+  window.location.href = paymentUri
+}
+
 export function Nanopaquete() {
   const [sellerForm, setSellerForm] = useState(initialSellerForm)
+  const [sellerPayment, setSellerPayment] = useState<SellerPaymentIntent | null>(null)
   const [escrowSession, setEscrowSession] = useState<EscrowSession | null>(null)
   const [publishedOffer, setPublishedOffer] = useState<PublishedOffer | null>(null)
   const [offers, setOffers] = useState<PublicOffer[]>([])
@@ -40,11 +45,6 @@ export function Nanopaquete() {
   const [takenOffer, setTakenOffer] = useState<TakenOffer | null>(null)
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-
-  const amountPreview = useMemo(() => {
-    if (!sellerForm.amountXno) return 'Cantidad pendiente'
-    return `${sellerForm.amountXno.replace(',', '.')} XNO`
-  }, [sellerForm.amountXno])
 
   const loadOffers = async () => {
     setError(null)
@@ -82,21 +82,33 @@ export function Nanopaquete() {
     setSellerForm((current) => ({ ...current, [field]: value }))
   }
 
-  const handleEscrowSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
+  const handleStartSellerPayment = async () => {
     setError(null)
     setPublishedOffer(null)
-    setLoading('escrow')
+    setEscrowSession(null)
+    setLoading('start-payment')
 
     try {
-      const session = await registerEscrow({
-        amountXno: sellerForm.amountXno,
-        sellerWallet: sellerForm.sellerWallet || undefined,
-        transferReference: sellerForm.transferReference || undefined,
-      })
-      setEscrowSession(session)
+      const intent = await startSellerPayment()
+      setSellerPayment(intent)
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'No se pudo registrar la custodia.')
+      setError(requestError instanceof Error ? requestError.message : 'No se pudo iniciar el deposito.')
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  const handleVerifySellerPayment = async () => {
+    if (!sellerPayment) return
+    setError(null)
+    setLoading('verify-payment')
+
+    try {
+      const session = await verifySellerPayment(sellerPayment.intentId)
+      setEscrowSession(session)
+      setSellerPayment(null)
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'El deposito aun no fue confirmado.')
     } finally {
       setLoading(null)
     }
@@ -166,16 +178,16 @@ export function Nanopaquete() {
       <section className="intro-band">
         <div>
           <p className="eyebrow">Compra y venta P2P</p>
-          <h2>Publica XNO custodiado y negocia el pago directamente.</h2>
+          <h2>Transfiere XNO a custodia y publica la oferta desde el pago confirmado.</h2>
           <p>
-            El vendedor deposita los XNO en custodia, publica una oferta privada de contacto y el comprador
-            registra la wallet donde recibira los fondos si la operacion se completa.
+            La cantidad en venta la define la transferencia Nano. Cuando el deposito se confirma, se habilita
+            el formulario para divisa, precio y contacto privado del vendedor.
           </p>
         </div>
         <div className="flow-grid" aria-label="Flujo principal">
-          <span><ShieldCheck size={18} /> Custodia</span>
+          <span><ShieldCheck size={18} /> Deposito</span>
           <ArrowRight size={18} />
-          <span><CheckCircle2 size={18} /> Negociacion</span>
+          <span><CheckCircle2 size={18} /> Publicacion</span>
           <ArrowRight size={18} />
           <span>0.1 XNO comision</span>
         </div>
@@ -190,54 +202,60 @@ export function Nanopaquete() {
             <h2>Crear oferta</h2>
           </div>
 
-          <form className="stack-form" onSubmit={handleEscrowSubmit}>
-            <label>
-              Cantidad de XNO en venta
-              <input
-                inputMode="decimal"
-                placeholder="10"
-                value={sellerForm.amountXno}
-                onChange={(event) => updateSellerForm('amountXno', event.target.value)}
-                required
-              />
-            </label>
-            <label>
-              Wallet nano del vendedor
-              <input
-                placeholder="nano_..."
-                value={sellerForm.sellerWallet}
-                onChange={(event) => updateSellerForm('sellerWallet', event.target.value)}
-              />
-            </label>
-            <label>
-              Referencia de transferencia
-              <input
-                placeholder="Hash, nota o confirmacion"
-                value={sellerForm.transferReference}
-                onChange={(event) => updateSellerForm('transferReference', event.target.value)}
-              />
-            </label>
-            <button className="primary-button" type="submit" disabled={loading === 'escrow'}>
-              Registrar custodia
-            </button>
-          </form>
+          {!sellerPayment && !escrowSession && (
+            <div className="deposit-start">
+              <p>
+                Inicia el deposito y transfiere a la cuenta de custodia la cantidad exacta de XNO que quieres vender.
+              </p>
+              <button className="primary-button" type="button" onClick={handleStartSellerPayment} disabled={loading === 'start-payment'}>
+                <Wallet size={18} />
+                Iniciar deposito
+              </button>
+            </div>
+          )}
 
-          {escrowSession && (
-            <div className="private-box">
-              <p className="eyebrow">Datos privados de custodia</p>
-              <div className="copy-row">
-                <span>{escrowSession.escrowWallet}</span>
-                <button type="button" onClick={() => void copyValue(escrowSession.escrowWallet)} aria-label="Copiar wallet de custodia">
+          {sellerPayment && (
+            <div className="private-box payment-box">
+              <p className="eyebrow">Deposito de custodia</p>
+              <div className="payment-actions">
+                <button className="primary-button" type="button" onClick={() => openNanoPayment(sellerPayment.paymentUri)}>
+                  <Wallet size={18} />
+                  Pagar desde el movil
+                </button>
+                <button className="ghost-button" type="button" onClick={() => void copyValue(sellerPayment.receiverAddress)}>
                   <Copy size={16} />
+                  Copiar wallet
                 </button>
               </div>
+              <div className="payment-qr" aria-label="QR de pago Nano">
+                <QRCodeSVG value={sellerPayment.paymentUri} size={176} marginSize={2} />
+              </div>
               <dl>
+                <dt>Wallet custodia</dt>
+                <dd>{sellerPayment.receiverAddress}</dd>
+                <dt>Vence</dt>
+                <dd>{shortDate(sellerPayment.expiresAt)}</dd>
                 <dt>Contacto custodio</dt>
-                <dd>{escrowSession.custodianContact}</dd>
+                <dd>{sellerPayment.custodianContact}</dd>
+              </dl>
+              <button className="primary-button" type="button" onClick={handleVerifySellerPayment} disabled={loading === 'verify-payment'}>
+                Verificar deposito
+              </button>
+            </div>
+          )}
+
+          {escrowSession && (
+            <div className="private-box verified-box">
+              <p className="eyebrow">Deposito confirmado</p>
+              <dl>
+                <dt>Cantidad en venta</dt>
+                <dd>{escrowSession.amountXno} XNO</dd>
+                <dt>Wallet origen</dt>
+                <dd>{escrowSession.sellerWallet}</dd>
+                <dt>Hash deposito</dt>
+                <dd>{escrowSession.paymentHash}</dd>
                 <dt>Comision de liberacion</dt>
                 <dd>{escrowSession.custodyFeeXno} XNO</dd>
-                <dt>Monto asociado</dt>
-                <dd>{amountPreview}</dd>
               </dl>
             </div>
           )}

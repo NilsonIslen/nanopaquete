@@ -15,15 +15,20 @@ export type PublicOffer = {
   createdAt: string
 }
 
-export type EscrowRegistration = {
-  amountXno: string
-  sellerWallet?: string
-  transferReference?: string
+export type SellerPaymentIntent = {
+  intentId: string
+  receiverAddress: string
+  paymentUri: string
+  expiresAt: string
+  custodianContact: string
 }
 
 export type EscrowSession = {
   escrowId: string
   publishToken: string
+  amountXno: string
+  sellerWallet: string
+  paymentHash: string
   custodianContact: string
   escrowWallet: string
   custodyFeeXno: string
@@ -82,10 +87,16 @@ async function requestJson<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const getOffers = () => requestJson<{ offers: PublicOffer[] }>('/offers')
 
-export const registerEscrow = (payload: EscrowRegistration) =>
-  requestJson<EscrowSession>('/escrows', {
+export const startSellerPayment = () =>
+  requestJson<SellerPaymentIntent>('/seller-payments', {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify({}),
+  })
+
+export const verifySellerPayment = (intentId: string) =>
+  requestJson<EscrowSession>(`/seller-payments/${encodeURIComponent(intentId)}/verify`, {
+    method: 'POST',
+    body: JSON.stringify({}),
   })
 
 export const publishOffer = (payload: PublishOfferPayload) =>
