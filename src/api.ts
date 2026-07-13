@@ -51,14 +51,12 @@ export type PublishedOffer = {
 
 export type TakeOfferPayload = {
   buyerNanoAddress: string
+  clientSessionId: string
 }
 
 export type TakenOffer = {
   offer: PublicOffer
   sellerContact: string
-  buyerCancelCode: string
-  custodianContact: string
-  custodyFeeXno: string
 }
 
 async function requestJson<T>(path: string, options?: RequestInit): Promise<T> {
@@ -109,4 +107,10 @@ export const takeOffer = (offerId: string, payload: TakeOfferPayload) =>
   requestJson<TakenOffer>(`/offers/${encodeURIComponent(offerId)}/take`, {
     method: 'POST',
     body: JSON.stringify(payload),
+  })
+
+export const cancelTakenOffer = (offerId: string, clientSessionId: string) =>
+  requestJson<{ offer: PublicOffer }>(`/offers/${encodeURIComponent(offerId)}/cancel-take`, {
+    method: 'POST',
+    body: JSON.stringify({ clientSessionId }),
   })

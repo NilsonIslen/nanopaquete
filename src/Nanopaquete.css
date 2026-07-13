@@ -447,3 +447,19 @@ dd {
   border-top: 1px solid #cfe0c9;
   margin-top: 2px;
 }
+
+.buyer-result {
+  gap: 16px;
+}
+
+.buyer-result > p:not(.eyebrow) {
+  color: #3f4f42;
+  line-height: 1.55;
+}
+
+.danger-button {
+  width: fit-content;
+  color: #7e261f;
+  background: #fdecea;
+  border-color: #f4c8c3;
+}

@@ -48,7 +48,7 @@ type OfferRecord = {
   sellerWallet?: string
   paymentHash?: string
   buyerNanoAddress?: string
-  buyerCancelCode?: string
+  buyerSessionId?: string
   status: OfferStatus
   createdAt: string
   takenAt?: string
@@ -299,7 +299,7 @@ const renderAdmin = (offers: OfferRecord[]) => `<!doctype html>
               <dt>Wallet vendedor</dt><dd>${escapeHtml(offer.sellerWallet)}</dd>
               <dt>Hash deposito</dt><dd>${escapeHtml(offer.paymentHash)}</dd>
               <dt>Wallet comprador</dt><dd>${escapeHtml(offer.buyerNanoAddress)}</dd>
-              <dt>Codigo comprador</dt><dd>${escapeHtml(offer.buyerCancelCode)}</dd>
+              <dt>Sesion comprador</dt><dd>${escapeHtml(offer.buyerSessionId)}</dd>
               <dt>Creada</dt><dd>${escapeHtml(offer.createdAt)}</dd>
               <dt>Tomada</dt><dd>${escapeHtml(offer.takenAt)}</dd>
               <dt>Nota admin</dt><dd>${escapeHtml(offer.adminNote)}</dd>
@@ -509,6 +509,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     const offerId = decodeURIComponent(takeMatch[1])
     const body = await readJsonBody(request)
     const buyerNanoAddress = normalizeText(body.buyerNanoAddress)
+    const clientSessionId = normalizeClientSessionId(body.clientSessionId)
 
     if (!isNanoAddress(buyerNanoAddress)) {
       sendJson(response, 400, { error: 'Ingresa una cuenta nano valida para recibir los XNO.' })
@@ -530,17 +531,48 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
 
     offer.status = 'NEGOTIATION'
     offer.buyerNanoAddress = buyerNanoAddress
-    offer.buyerCancelCode = createCode(8)
+    offer.buyerSessionId = clientSessionId || undefined
     offer.takenAt = new Date().toISOString()
     await writeStore(store)
 
     sendJson(response, 200, {
       offer: publicOffer(offer),
       sellerContact: offer.sellerContact,
-      buyerCancelCode: offer.buyerCancelCode,
-      custodianContact,
-      custodyFeeXno,
     })
+    return
+  }
+
+  const cancelTakeMatch = url.pathname.match(/^\/api\/offers\/([^/]+)\/cancel-take$/)
+
+  if (request.method === 'POST' && cancelTakeMatch) {
+    const offerId = decodeURIComponent(cancelTakeMatch[1])
+    const body = await readJsonBody(request)
+    const clientSessionId = normalizeClientSessionId(body.clientSessionId)
+    const store = await readStore()
+    const offer = store.offers.find((item) => item.id === offerId)
+
+    if (!offer) {
+      sendJson(response, 404, { error: 'La oferta no existe.' })
+      return
+    }
+
+    if (offer.status !== 'NEGOTIATION') {
+      sendJson(response, 409, { error: 'Esta oferta no esta en negociacion.' })
+      return
+    }
+
+    if (offer.buyerSessionId && offer.buyerSessionId !== clientSessionId) {
+      sendJson(response, 403, { error: 'Solo la sesion que tomo la oferta puede cancelar este proceso.' })
+      return
+    }
+
+    offer.status = 'ACTIVE'
+    offer.buyerNanoAddress = undefined
+    offer.buyerSessionId = undefined
+    offer.takenAt = undefined
+    await writeStore(store)
+
+    sendJson(response, 200, { offer: publicOffer(offer) })
     return
   }
 

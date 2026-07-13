@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { ArrowRight, CheckCircle2, Copy, RefreshCw, ShieldCheck, Wallet } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import {
+  cancelTakenOffer,
   getOffers,
   publishOffer,
   startSellerPayment,
@@ -180,13 +181,29 @@ export function Nanopaquete() {
     setLoading('take')
 
     try {
-      const response = await takeOffer(selectedOffer.id, { buyerNanoAddress })
+      const response = await takeOffer(selectedOffer.id, { buyerNanoAddress, clientSessionId })
       setTakenOffer(response)
       setSelectedOffer(null)
       setBuyerNanoAddress('')
       await loadOffers()
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'No se pudo tomar la oferta.')
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  const handleCancelTakenOffer = async () => {
+    if (!takenOffer) return
+    setError(null)
+    setLoading('cancel-take')
+
+    try {
+      await cancelTakenOffer(takenOffer.offer.id, clientSessionId)
+      setTakenOffer(null)
+      await loadOffers()
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'No se pudo cancelar el proceso.')
     } finally {
       setLoading(null)
     }
@@ -409,16 +426,22 @@ export function Nanopaquete() {
           {takenOffer && (
             <div className="private-box buyer-result">
               <p className="eyebrow">Negociacion iniciada</p>
+              <h3>Comunicate con el vendedor para acordar como haras el pago.</h3>
+              <p>Los XNO de esta oferta ya estan bloqueados en custodia. El vendedor solo puede pedir que se liberen a la wallet Nano que registraste cuando reciba tu pago.</p>
               <dl>
                 <dt>Contacto vendedor</dt>
                 <dd>{takenOffer.sellerContact}</dd>
-                <dt>Codigo temporal</dt>
-                <dd>{takenOffer.buyerCancelCode}</dd>
-                <dt>Contacto custodio</dt>
-                <dd>{takenOffer.custodianContact}</dd>
-                <dt>Comision custodio</dt>
-                <dd>{takenOffer.custodyFeeXno} XNO</dd>
+                <dt>Oferta tomada</dt>
+                <dd>{takenOffer.offer.amountXno} XNO por {takenOffer.offer.price} {takenOffer.offer.currency}</dd>
               </dl>
+              <button
+                className="ghost-button danger-button"
+                type="button"
+                onClick={handleCancelTakenOffer}
+                disabled={loading === 'cancel-take'}
+              >
+                Cancelar proceso
+              </button>
             </div>
           )}
         </div>
