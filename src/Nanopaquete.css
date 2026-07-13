@@ -149,6 +149,25 @@ button:disabled {
   line-height: 1.55;
 }
 
+.asset-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.asset-list span {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #c5d4e2;
+  border-radius: 8px;
+  background: #f7fbff;
+  color: #24384d;
+  padding: 0 10px;
+  font-size: 0.86rem;
+  font-weight: 800;
+}
+
 .inline-heading {
   grid-template-columns: 1fr auto;
   align-items: end;
@@ -265,7 +284,33 @@ dd {
 
 .offer-list {
   display: grid;
+  gap: 18px;
+}
+
+.offer-group {
+  display: grid;
   gap: 12px;
+}
+
+.offer-group-heading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #d9e2ec;
+  padding-bottom: 8px;
+}
+
+.offer-group-heading h3 {
+  font-size: 1rem;
+  color: #17202a;
+}
+
+.offer-group-heading span {
+  color: #506172;
+  font-size: 0.86rem;
+  font-weight: 800;
 }
 
 .offer-card {
@@ -318,6 +363,11 @@ dd {
 .buyer-result {
   border-color: #d9c37b;
   background: #fff9e6;
+}
+
+.donation-panel > p {
+  color: #3d4f63;
+  line-height: 1.55;
 }
 
 @media (max-width: 980px) {

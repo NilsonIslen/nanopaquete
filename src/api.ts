@@ -3,13 +3,44 @@ const defaultApiUrl = `${window.location.protocol}//${window.location.hostname}:
 export const nanopaqueteApiUrl =
   import.meta.env.VITE_NANOPAQUETE_API_URL?.trim() || defaultApiUrl
 
-export type Currency = 'COP' | 'USD' | 'BTC' | 'EUR'
+export type Currency =
+  | 'ARS'
+  | 'BOB'
+  | 'BRL'
+  | 'CLP'
+  | 'COP'
+  | 'CRC'
+  | 'CUP'
+  | 'DOP'
+  | 'EUR'
+  | 'GTQ'
+  | 'HNL'
+  | 'HTG'
+  | 'BTC'
+  | 'ETH'
+  | 'USDT'
+  | 'USDC'
+  | 'BNB'
+  | 'SOL'
+  | 'XRP'
+  | 'ADA'
+  | 'DOGE'
+  | 'TRX'
+  | 'MXN'
+  | 'NIO'
+  | 'PYG'
+  | 'PEN'
+  | 'USD'
+  | 'UYU'
+  | 'VES'
 export type OfferStatus = 'ACTIVE' | 'NEGOTIATION' | 'RELEASING' | 'RELEASED' | 'CANCELLED' | 'DISPUTED'
 
 export type CustodianOption = {
   id: string
   name: string
   contact: string
+  wallet?: string
+  isLeader?: boolean
 }
 
 export type ManagedCustodian = CustodianOption & {

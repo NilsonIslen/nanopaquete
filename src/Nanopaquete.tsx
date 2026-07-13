@@ -35,9 +35,77 @@ import {
 } from './api'
 import './Nanopaquete.css'
 
-const currencies: Currency[] = ['COP', 'USD', 'BTC', 'EUR']
+const currencies: Currency[] = [
+  'ARS',
+  'BOB',
+  'BRL',
+  'CLP',
+  'COP',
+  'CRC',
+  'CUP',
+  'DOP',
+  'EUR',
+  'GTQ',
+  'HNL',
+  'HTG',
+  'BTC',
+  'ETH',
+  'USDT',
+  'USDC',
+  'BNB',
+  'SOL',
+  'XRP',
+  'ADA',
+  'DOGE',
+  'TRX',
+  'MXN',
+  'NIO',
+  'PYG',
+  'PEN',
+  'USD',
+  'UYU',
+  'VES',
+]
 
-type AppView = 'offers' | 'create-offer' | 'wallet' | 'custodian-auth' | 'guide'
+const currencyDetails: Record<Currency, { label: string; group: string; isCrypto?: boolean }> = {
+  ARS: { label: 'Peso argentino', group: 'Argentina' },
+  BOB: { label: 'Boliviano', group: 'Bolivia' },
+  BRL: { label: 'Real brasileno', group: 'Brasil' },
+  CLP: { label: 'Peso chileno', group: 'Chile' },
+  COP: { label: 'Peso colombiano', group: 'Colombia' },
+  CRC: { label: 'Colon costarricense', group: 'Costa Rica' },
+  CUP: { label: 'Peso cubano', group: 'Cuba' },
+  DOP: { label: 'Peso dominicano', group: 'Republica Dominicana' },
+  EUR: { label: 'Euro', group: 'Espana' },
+  GTQ: { label: 'Quetzal guatemalteco', group: 'Guatemala' },
+  HNL: { label: 'Lempira hondureno', group: 'Honduras' },
+  HTG: { label: 'Gourde haitiano', group: 'Haiti' },
+  BTC: { label: 'Bitcoin', group: 'Global', isCrypto: true },
+  ETH: { label: 'Ethereum', group: 'Global', isCrypto: true },
+  USDT: { label: 'Tether', group: 'Global', isCrypto: true },
+  USDC: { label: 'USD Coin', group: 'Global', isCrypto: true },
+  BNB: { label: 'BNB', group: 'Global', isCrypto: true },
+  SOL: { label: 'Solana', group: 'Global', isCrypto: true },
+  XRP: { label: 'XRP', group: 'Global', isCrypto: true },
+  ADA: { label: 'Cardano', group: 'Global', isCrypto: true },
+  DOGE: { label: 'Dogecoin', group: 'Global', isCrypto: true },
+  TRX: { label: 'TRON', group: 'Global', isCrypto: true },
+  MXN: { label: 'Peso mexicano', group: 'Mexico' },
+  NIO: { label: 'Cordoba nicaraguense', group: 'Nicaragua' },
+  PYG: { label: 'Guarani paraguayo', group: 'Paraguay' },
+  PEN: { label: 'Sol peruano', group: 'Peru' },
+  USD: { label: 'Dolar estadounidense', group: 'El Salvador, Ecuador y Panama' },
+  UYU: { label: 'Peso uruguayo', group: 'Uruguay' },
+  VES: { label: 'Bolivar venezolano', group: 'Venezuela' },
+}
+
+const getCurrencyLabel = (currency: Currency) => `${currency} - ${currencyDetails[currency].label}`
+const getOfferGroupTitle = (currency: Currency) => {
+  const details = currencyDetails[currency]
+  return details.isCrypto ? 'Global' : `${currency} ${details.group}`
+}
+
+type AppView = 'offers' | 'create-offer' | 'wallet' | 'donations' | 'custodian-auth' | 'guide'
 
 const nautilusDownloadUrl = 'https://nautilus.io/'
 const natriumDownloadUrl = 'https://natrium.io/'
@@ -160,6 +228,24 @@ const sortOffers = (offers: PublicOffer[], isCustodian: boolean) =>
     return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
   })
 
+type OfferGroup = {
+  title: string
+  offers: PublicOffer[]
+}
+
+const groupOffers = (offers: PublicOffer[]): OfferGroup[] => {
+  const groups = new Map<string, PublicOffer[]>()
+
+  offers.forEach((offer) => {
+    const title = getOfferGroupTitle(offer.currency)
+    groups.set(title, [...(groups.get(title) ?? []), offer])
+  })
+
+  return Array.from(groups.entries())
+    .map(([title, groupedOffers]) => ({ title, offers: groupedOffers }))
+    .sort((left, right) => right.offers.length - left.offers.length || left.title.localeCompare(right.title, 'es'))
+}
+
 export function Nanopaquete() {
   const [sellerForm, setSellerForm] = useState(initialSellerForm)
   const [sellerPayment, setSellerPayment] = useState<SellerPaymentIntent | null>(getStoredSellerPayment)
@@ -185,6 +271,10 @@ export function Nanopaquete() {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [clientSessionId] = useState(getClientSessionId)
   const visibleOffers = takenOffer ? [takenOffer.offer] : sortOffers(offers, Boolean(custodianSession))
+  const offerGroups = groupOffers(visibleOffers)
+  const donationCustodian = custodians.find((custodian) => custodian.isLeader && custodian.wallet) ?? custodians.find((custodian) => custodian.wallet)
+  const donationWallet = donationCustodian?.wallet ?? ''
+  const donationPaymentUri = donationWallet ? `nano:${donationWallet}` : ''
   const takenOfferId = takenOffer?.offer.id
   const displayedManagedCustodians = [...managedCustodians].sort((left, right) => {
     if (left.id === custodianSession?.custodianId) return -1
@@ -214,13 +304,6 @@ export function Nanopaquete() {
     setSelectedCustodianId((current) =>
       response.custodians.some((custodian) => custodian.id === current) ? current : response.custodians[0]?.id || '',
     )
-  }
-
-  const loadManagedCustodians = async (sessionId = custodianSession?.sessionId) => {
-    if (!sessionId) return
-    const response = await getManagedCustodians(sessionId)
-    setManagedCustodians(response.custodians)
-    setCanManageCustodians(response.canManage)
   }
 
   useEffect(() => {
@@ -303,16 +386,26 @@ export function Nanopaquete() {
   }, [custodianSession])
 
   useEffect(() => {
-    if (!custodianSession) {
-      setManagedCustodians([])
-      setCanManageCustodians(false)
-      return
-    }
+    if (!custodianSession) return
 
-    loadManagedCustodians(custodianSession.sessionId).catch((requestError) => {
-      setError(requestError instanceof Error ? requestError.message : 'No se pudo cargar la lista de custodios.')
-    })
-  }, [custodianSession?.sessionId])
+    let ignore = false
+
+    getManagedCustodians(custodianSession.sessionId)
+      .then((response) => {
+        if (ignore) return
+        setManagedCustodians(response.custodians)
+        setCanManageCustodians(response.canManage)
+      })
+      .catch((requestError) => {
+        if (!ignore) {
+          setError(requestError instanceof Error ? requestError.message : 'No se pudo cargar la lista de custodios.')
+        }
+      })
+
+    return () => {
+      ignore = true
+    }
+  }, [custodianSession])
 
   const updateSellerForm = (field: keyof typeof sellerForm, value: string) => {
     setSellerForm((current) => ({ ...current, [field]: value }))
@@ -661,6 +754,7 @@ export function Nanopaquete() {
             <div className="app-menu">
               <button type="button" onClick={() => { setActiveView('create-offer'); setIsMenuOpen(false) }}>Crear oferta</button>
               <button type="button" onClick={() => { setActiveView('wallet'); setIsMenuOpen(false) }}>Descargar wallet</button>
+              <button type="button" onClick={() => { setActiveView('donations'); setIsMenuOpen(false) }}>Donaciones</button>
               <button type="button" onClick={() => { setActiveView('custodian-auth'); setIsMenuOpen(false) }}>Custodios</button>
               <button type="button" onClick={() => { setActiveView('guide'); setIsMenuOpen(false) }}>Guia</button>
             </div>
@@ -830,6 +924,41 @@ export function Nanopaquete() {
         </section>
       )}
 
+      {activeView === 'donations' && (
+        <section className="single-page-panel">
+          <div className="panel donation-panel">
+            <h2>Donaciones</h2>
+            <p>Las donaciones ayudan a sostener el desarrollo, el mantenimiento y la infraestructura necesaria para que Nanopaquete funcione de forma continua.</p>
+            <p>Cualquier aporte en Nano se recibe en la cuenta del custodio lider actual.</p>
+            {donationPaymentUri ? (
+              <>
+                <div className="payment-actions">
+                  <button className="primary-button" type="button" onClick={() => openNanoPayment(donationPaymentUri)}>
+                    <Wallet size={18} />
+                    Donar con Nano
+                  </button>
+                  <button className="ghost-button" type="button" onClick={() => void copyValue(donationWallet)}>
+                    <Copy size={16} />
+                    Copiar cuenta
+                  </button>
+                </div>
+                <div className="payment-qr" aria-label="QR para donar Nano">
+                  <QRCodeSVG value={donationPaymentUri} size={176} marginSize={2} />
+                </div>
+                <dl>
+                  <dt>Cuenta Nano</dt>
+                  <dd>{donationWallet}</dd>
+                  <dt>Custodio lider</dt>
+                  <dd>{donationCustodian?.name ?? 'No disponible'}</dd>
+                </dl>
+              </>
+            ) : (
+              <p className="empty-state">No hay una cuenta de donacion disponible en este momento.</p>
+            )}
+          </div>
+        </section>
+      )}
+
       {activeView === 'guide' && (
         <section className="single-page-panel">
           <div className="panel guide-panel">
@@ -878,8 +1007,14 @@ export function Nanopaquete() {
         <div className="panel seller-panel">
           <div className="panel-heading">
             <h2>Crear oferta</h2>
-            <p>Vas a poner en venta la cantidad de XNO que deposites en custodia. Primero transfiere el monto exacto al custodio seleccionado; cuando Nanopaquete detecte el depósito, podrás indicar qué activo y cuánto esperas recibir a cambio.</p>
-            <p>Este proceso es irreversible desde esta pantalla. Si después necesitas reembolsar los fondos de la oferta, debes simular una compra desde otro dispositivo y pagar la comisión de 0,1 XNO para que el custodio pueda liberarlos.</p>
+            <p>Deposita los XNO que quieres vender. Cuando Nanopaquete detecte el depósito, publica el activo y el precio que esperas recibir.</p>
+            <p>Activos disponibles para negociar por Nano:</p>
+            <div className="asset-list" aria-label="Activos disponibles para negociar por Nano">
+              {currencies.map((currency) => (
+                <span key={currency}>{getCurrencyLabel(currency)}</span>
+              ))}
+            </div>
+            <p>Si necesitas reembolsar una oferta publicada, deberás tomarla desde otro dispositivo y pagar la comisión de 0,1 XNO para que el custodio libere los fondos.</p>
           </div>
 
           {!sellerPayment && !escrowSession && (
@@ -967,13 +1102,13 @@ export function Nanopaquete() {
           {escrowSession && (
             <form className="stack-form publish-form" onSubmit={handlePublishSubmit}>
               <label>
-                Divisa
+                Activo a recibir
                 <select
                   value={sellerForm.currency}
                   onChange={(event) => updateSellerForm('currency', event.target.value as Currency)}
                 >
                   {currencies.map((currency) => (
-                    <option key={currency} value={currency}>{currency}</option>
+                    <option key={currency} value={currency}>{getCurrencyLabel(currency)}</option>
                   ))}
                 </select>
               </label>
@@ -1043,11 +1178,17 @@ export function Nanopaquete() {
           </div>
 
           <div className="offer-list">
-            {visibleOffers.map((offer) => {
-              const isSelected = selectedOffer?.id === offer.id
+            {offerGroups.map((group) => (
+              <section className="offer-group" key={group.title}>
+                <div className="offer-group-heading">
+                  <h3>{group.title}</h3>
+                  <span>{group.offers.length} {group.offers.length === 1 ? 'oferta' : 'ofertas'}</span>
+                </div>
+                {group.offers.map((offer) => {
+                  const isSelected = selectedOffer?.id === offer.id
 
-              return (
-                <article className={isSelected ? 'offer-card selected-offer-card' : 'offer-card'} key={offer.id}>
+                  return (
+                    <article className={isSelected ? 'offer-card selected-offer-card' : 'offer-card'} key={offer.id}>
                   <div>
                     <p className="offer-amount">{offer.amountXno} XNO</p>
                     <p>{offer.price} {offer.currency}</p>
@@ -1262,9 +1403,11 @@ export function Nanopaquete() {
                       </div>
                     </form>
                   )}
-                </article>
-              )
-            })}
+                    </article>
+                  )
+                })}
+              </section>
+            ))}
             {!visibleOffers.length && <p className="empty-state">No hay ofertas activas en este momento.</p>}
           </div>
 

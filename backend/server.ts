@@ -6,7 +6,37 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { findAnyIncomingPayment, findIncomingPaymentByAmount, findIncomingPaymentBySenderAmount, isNanoAddress, nanoToRaw } from './nano-rpc'
 
-const currencies = ['COP', 'USD', 'BTC', 'EUR'] as const
+const currencies = [
+  'ARS',
+  'BOB',
+  'BRL',
+  'CLP',
+  'COP',
+  'CRC',
+  'CUP',
+  'DOP',
+  'EUR',
+  'GTQ',
+  'HNL',
+  'HTG',
+  'BTC',
+  'ETH',
+  'USDT',
+  'USDC',
+  'BNB',
+  'SOL',
+  'XRP',
+  'ADA',
+  'DOGE',
+  'TRX',
+  'MXN',
+  'NIO',
+  'PYG',
+  'PEN',
+  'USD',
+  'UYU',
+  'VES',
+] as const
 
 type Currency = (typeof currencies)[number]
 type OfferStatus = 'ACTIVE' | 'NEGOTIATION' | 'RELEASING' | 'RELEASED' | 'CANCELLED' | 'DISPUTED'
@@ -535,6 +565,8 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
         id: custodian.id,
         name: custodian.name,
         contact: custodian.contact,
+        wallet: custodian.wallet,
+        isLeader: custodian.isLeader,
       })),
     })
     return
@@ -926,7 +958,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     const sellerContact = normalizeText(body.sellerContact)
 
     if (!isCurrency(currency)) {
-      sendJson(response, 400, { error: 'Selecciona una divisa valida.' })
+      sendJson(response, 400, { error: 'Selecciona un activo valido.' })
       return
     }
 
