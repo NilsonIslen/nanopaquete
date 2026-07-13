@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { CheckCircle2, Copy, Download, PackageCheck, ShieldCheck, Wallet, X } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, Copy, Download, Menu, PackageCheck, ShieldCheck, Wallet, X } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import {
   cancelTakenOffer,
@@ -29,6 +29,8 @@ import {
 import './Nanopaquete.css'
 
 const currencies: Currency[] = ['COP', 'USD', 'BTC', 'EUR']
+
+type AppView = 'offers' | 'create-offer' | 'wallet' | 'custodian-auth' | 'seller-auth' | 'buyer-auth' | 'guide'
 
 const nautilusDownloadUrl = 'https://nautilus.io/'
 
@@ -158,6 +160,8 @@ export function Nanopaquete() {
   const [releaseFeeIntent, setReleaseFeeIntent] = useState<ReleaseFeeIntent | null>(null)
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [activeView, setActiveView] = useState<AppView>('offers')
+  const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [clientSessionId] = useState(getClientSessionId)
   const visibleOffers = takenOffer ? [takenOffer.offer] : sortOffers(offers, Boolean(custodianSession))
 
@@ -259,6 +263,7 @@ export function Nanopaquete() {
     try {
       const intent = await startSellerPayment(clientSessionId, selectedCustodianId)
       setSellerPayment(intent)
+      setActiveView('create-offer')
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'No se pudo iniciar el deposito.')
     } finally {
@@ -307,6 +312,7 @@ export function Nanopaquete() {
       setPublishedOffer(response)
       setEscrowSession(null)
       setSellerForm(initialSellerForm)
+      setActiveView('offers')
       await loadOffers()
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'No se pudo publicar la oferta.')
@@ -439,6 +445,27 @@ export function Nanopaquete() {
     }
   }
 
+  const handleCloseAllSessions = async () => {
+    setSellerPayment(null)
+    setTakenOffer(null)
+    setCustodianSession(null)
+    setCustodianAuthIntent(null)
+    setReleaseFeeIntent(null)
+    setSelectedOffer(null)
+    setActiveView('offers')
+    setError(null)
+    window.localStorage.removeItem(sellerPaymentStorageKey)
+    window.localStorage.removeItem(takenOfferStorageKey)
+    window.localStorage.removeItem(custodianSessionStorageKey)
+
+    try {
+      const response = await getOffers(clientSessionId)
+      setOffers(response.offers)
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'No se pudieron cargar las ofertas.')
+    }
+  }
+
   const handleCancelTakenOffer = async () => {
     if (!takenOffer) return
     setError(null)
@@ -471,30 +498,48 @@ export function Nanopaquete() {
             <p className="topbar-subtitle">Custodia de Nano para comercio P2P</p>
           </div>
         </div>
-        <div className="topbar-actions">
-          <a className="wallet-download-link" href={nautilusDownloadUrl} target="_blank" rel="noreferrer">
-            <Download size={17} />
-            Nautilus
-          </a>
-          <button
-            className={custodianSession ? 'icon-button active-custodian-button' : 'icon-button'}
-            type="button"
-            onClick={custodianSession ? undefined : handleStartCustodianAuth}
-            disabled={loading === 'custodian-auth-start'}
-            aria-label={custodianSession ? `Custodio autenticado: ${custodianSession.custodianName}` : 'Acceso custodio autorizado'}
-            title={custodianSession ? `Custodio autenticado: ${custodianSession.custodianName}` : 'Acceso custodio autorizado'}
-          >
-            <ShieldCheck size={20} />
+        <div className="topbar-actions menu-area">
+          <button className="icon-button" type="button" onClick={() => setIsMenuOpen((current) => !current)} aria-label="Abrir menu" title="Menu">
+            <Menu size={20} />
           </button>
-          {custodianSession && (
-            <button className="icon-button" type="button" onClick={() => void handleCloseCustodianSession()} aria-label="Cerrar sesion custodio" title="Cerrar sesion custodio">
-              <X size={18} />
-            </button>
+          {isMenuOpen && (
+            <div className="app-menu">
+              <button type="button" onClick={() => { setActiveView('create-offer'); setIsMenuOpen(false) }}>Crear oferta</button>
+              <button type="button" onClick={() => { setActiveView('wallet'); setIsMenuOpen(false) }}>Descargar wallet (Nautilus)</button>
+              <button type="button" onClick={() => { setActiveView('custodian-auth'); setIsMenuOpen(false) }}>Autenticacion custodio</button>
+              <button type="button" onClick={() => { setActiveView('seller-auth'); setIsMenuOpen(false) }}>Autenticacion vendedor</button>
+              <button type="button" onClick={() => { setActiveView('buyer-auth'); setIsMenuOpen(false) }}>Autenticacion comprador</button>
+              <button type="button" onClick={() => { setActiveView('guide'); setIsMenuOpen(false) }}>Guia</button>
+              <button type="button" onClick={() => { void handleCloseAllSessions(); setIsMenuOpen(false) }}>Cerrar sesion</button>
+            </div>
           )}
         </div>
       </header>
 
-      {custodianAuthIntent && (
+      {activeView === 'custodian-auth' && !custodianAuthIntent && (
+        <section className="single-page-panel">
+          <div className="panel">
+            <h2>Autenticacion custodio</h2>
+            <p>Acceso solo para cuentas autorizadas.</p>
+            {custodianSession ? (
+              <div className="private-box">
+                <p>Custodio autenticado: <strong>{custodianSession.custodianName}</strong></p>
+                <button className="ghost-button danger-button" type="button" onClick={() => void handleCloseCustodianSession()}>
+                  <X size={16} />
+                  Cerrar sesion
+                </button>
+              </div>
+            ) : (
+              <button className="primary-button" type="button" onClick={handleStartCustodianAuth} disabled={loading === 'custodian-auth-start' || !selectedCustodianId}>
+                <ShieldCheck size={18} />
+                Iniciar autenticacion
+              </button>
+            )}
+          </div>
+        </section>
+      )}
+
+      {activeView === 'custodian-auth' && custodianAuthIntent && (
         <section className="intro-band compact-intro-band auth-panel-band">
           <div className="private-box custodian-auth-box">
             <p className="eyebrow">Acceso solo para cuentas autorizadas</p>
@@ -526,7 +571,67 @@ export function Nanopaquete() {
 
       {error && <div className="status-message error">{error}</div>}
 
-      <section className="work-grid">
+      {activeView !== 'offers' && (
+        <section className="page-toolbar">
+          <button className="ghost-button" type="button" onClick={() => setActiveView('offers')}>
+            <ArrowLeft size={17} />
+            Volver a ofertas
+          </button>
+        </section>
+      )}
+
+      {activeView === 'wallet' && (
+        <section className="single-page-panel">
+          <div className="panel">
+            <h2>Descargar wallet</h2>
+            <p>Instala Nautilus para crear o usar una wallet Nano compatible antes de comprar o vender XNO.</p>
+            <a className="wallet-download-link standalone-link" href={nautilusDownloadUrl} target="_blank" rel="noreferrer">
+              <Download size={17} />
+              Abrir Nautilus
+            </a>
+          </div>
+        </section>
+      )}
+
+      {activeView === 'seller-auth' && (
+        <section className="single-page-panel">
+          <div className="panel">
+            <h2>Autenticacion vendedor</h2>
+            <p>Esta seccion se usara para recuperar acceso cuando el vendedor pierda el movil o cierre la sesion mientras tiene una venta abierta.</p>
+            <p>La recuperacion debe validar control de la wallet que publico la oferta antes de mostrar acciones privadas.</p>
+          </div>
+        </section>
+      )}
+
+      {activeView === 'buyer-auth' && (
+        <section className="single-page-panel">
+          <div className="panel">
+            <h2>Autenticacion comprador</h2>
+            <p>Esta seccion se usara para recuperar una negociacion tomada desde otro dispositivo sin exponer datos privados a terceros.</p>
+            <p>La recuperacion debe validar control de la wallet registrada para recibir los XNO.</p>
+          </div>
+        </section>
+      )}
+
+      {activeView === 'guide' && (
+        <section className="single-page-panel">
+          <div className="panel guide-panel">
+            <h2>Guia</h2>
+            <h3>Condiciones generales</h3>
+            <p>Nanopaquete organiza negociaciones P2P con custodia Nano. El vendedor deposita los XNO antes de publicar y el comprador registra la wallet donde desea recibirlos.</p>
+            <h3>Vendedor</h3>
+            <p>Publica solo montos que ya transferiste a la cuenta de custodia seleccionada. Confirma el pago fiat/externo solo cuando realmente lo hayas recibido.</p>
+            <h3>Comprador</h3>
+            <p>Antes de pagar, verifica que la oferta siga en negociacion y que la wallet registrada sea correcta. Si cancelas antes de que el vendedor confirme, la oferta vuelve a estar disponible.</p>
+            <h3>Custodio</h3>
+            <p>Solo custodios autorizados pueden liberar fondos. La liberacion se hace unicamente hacia la wallet registrada por el comprador y solo cuando la oferta esta en estado liberando.</p>
+          </div>
+        </section>
+      )}
+
+      {(activeView === 'offers' || activeView === 'create-offer' || activeView === 'custodian-auth') && (
+      <section className={activeView === 'offers' || activeView === 'custodian-auth' ? 'work-grid offers-only' : 'work-grid'}>
+        {activeView === 'create-offer' && (
         <div className="panel seller-panel">
           <div className="panel-heading">
             <h2>Crear oferta</h2>
@@ -684,7 +789,9 @@ export function Nanopaquete() {
             </div>
           )}
         </div>
+        )}
 
+        {(activeView === 'offers' || activeView === 'custodian-auth') && (
         <div className="panel offers-panel">
           <div className="panel-heading inline-heading">
             <div>
@@ -894,7 +1001,9 @@ export function Nanopaquete() {
             </div>
           )}
         </div>
+        )}
       </section>
+      )}
     </main>
   )
 }

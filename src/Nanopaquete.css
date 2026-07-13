@@ -644,3 +644,76 @@ dd {
     flex: 1 1 auto;
   }
 }
+
+.menu-area {
+  position: relative;
+}
+
+.app-menu {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  z-index: 20;
+  min-width: 260px;
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid #c9d7e5;
+  border-radius: 8px;
+  background: #ffffff;
+  box-shadow: 0 16px 38px rgba(24, 50, 71, 0.16);
+}
+
+.app-menu button {
+  justify-content: flex-start;
+  min-height: 38px;
+  background: transparent;
+  color: #183247;
+  border: 0;
+  font-weight: 750;
+}
+
+.app-menu button:hover {
+  background: #edf4fa;
+}
+
+.page-toolbar {
+  padding: 18px clamp(18px, 4vw, 42px) 0;
+}
+
+.single-page-panel {
+  padding: clamp(18px, 4vw, 42px);
+}
+
+.single-page-panel .panel {
+  max-width: 860px;
+}
+
+.single-page-panel p {
+  color: #3d4f63;
+  line-height: 1.55;
+}
+
+.guide-panel {
+  gap: 14px;
+}
+
+.standalone-link {
+  width: fit-content;
+}
+
+.offers-only {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.offers-only .offers-panel {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 640px) {
+  .app-menu {
+    left: auto;
+    right: 0;
+    min-width: min(82vw, 300px);
+  }
+}
