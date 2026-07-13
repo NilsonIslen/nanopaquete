@@ -283,6 +283,15 @@ export function Nanopaquete() {
           {escrowSession && (
             <div className="private-box verified-box">
               <p className="eyebrow">Deposito confirmado</p>
+              <div className="custodian-alert">
+                <span>Custodio para disputa y liberacion</span>
+                <strong>{escrowSession.custodianContact}</strong>
+                <button type="button" onClick={() => void copyValue(escrowSession.custodianContact)}>
+                  <Copy size={16} />
+                  Copiar
+                </button>
+                <p>Conserva este contacto. Si el comprador no paga o hay disputa, el custodio es quien puede mantener bloqueada, cancelar o liberar la publicacion con fondos.</p>
+              </div>
               <dl>
                 <dt>Cantidad en venta</dt>
                 <dd>{escrowSession.amountXno} XNO</dd>

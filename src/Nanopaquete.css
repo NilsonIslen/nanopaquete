@@ -402,3 +402,36 @@ dd {
     box-sizing: border-box;
   }
 }
+
+.custodian-alert {
+  display: grid;
+  gap: 10px;
+  border: 2px solid #d9a21b;
+  border-radius: 8px;
+  background: #fff7df;
+  color: #33260b;
+  padding: 14px;
+}
+
+.custodian-alert span {
+  color: #6c4c00;
+  font-size: 0.78rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.custodian-alert strong {
+  font-size: clamp(1.3rem, 4vw, 1.8rem);
+  overflow-wrap: anywhere;
+}
+
+.custodian-alert button {
+  width: fit-content;
+  background: #7b5600;
+  color: #ffffff;
+}
+
+.custodian-alert p {
+  color: #4f3b0b;
+  line-height: 1.5;
+}
