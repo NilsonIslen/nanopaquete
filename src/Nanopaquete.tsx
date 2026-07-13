@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { CheckCircle2, Copy, PackageCheck, ShieldCheck, Wallet, X } from 'lucide-react'
+import { CheckCircle2, Copy, Download, PackageCheck, ShieldCheck, Wallet, X } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import {
   cancelTakenOffer,
@@ -29,6 +29,8 @@ import {
 import './Nanopaquete.css'
 
 const currencies: Currency[] = ['COP', 'USD', 'BTC', 'EUR']
+
+const nautilusDownloadUrl = 'https://nautilus.io/'
 
 const contactCountries = [
   { country: 'Colombia', dialCode: '+57' },
@@ -470,6 +472,10 @@ export function Nanopaquete() {
           </div>
         </div>
         <div className="topbar-actions">
+          <a className="wallet-download-link" href={nautilusDownloadUrl} target="_blank" rel="noreferrer">
+            <Download size={17} />
+            Nautilus
+          </a>
           <button
             className={custodianSession ? 'icon-button active-custodian-button' : 'icon-button'}
             type="button"

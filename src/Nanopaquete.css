@@ -1,7 +1,7 @@
 .app-shell {
   min-height: 100vh;
-  background: #f5f7f4;
-  color: #172019;
+  background: #f5f8fb;
+  color: #17202a;
 }
 
 .topbar {
@@ -10,7 +10,7 @@
   gap: 16px;
   align-items: center;
   padding: 22px clamp(18px, 4vw, 42px);
-  border-bottom: 1px solid #dce3da;
+  border-bottom: 1px solid #d9e2ec;
   background: #ffffff;
 }
 
@@ -36,7 +36,7 @@ h3 {
 }
 
 .eyebrow {
-  color: #526255;
+  color: #506172;
   font-size: 0.76rem;
   font-weight: 800;
   letter-spacing: 0;
@@ -69,14 +69,14 @@ button:disabled {
 
 .primary-button,
 .offer-card button {
-  background: #206b3a;
+  background: #1f5f8f;
   color: white;
 }
 
 .ghost-button {
-  background: #eef3ec;
-  color: #1e3224;
-  border: 1px solid #cfdbcc;
+  background: #edf4fa;
+  color: #183247;
+  border: 1px solid #c9d7e5;
 }
 
 .intro-band {
@@ -85,8 +85,8 @@ button:disabled {
   gap: 24px;
   align-items: end;
   padding: clamp(24px, 5vw, 54px) clamp(18px, 4vw, 42px);
-  background: #e9efe6;
-  border-bottom: 1px solid #d7dfd3;
+  background: #e8f1f8;
+  border-bottom: 1px solid #d4e0ea;
 }
 
 .intro-band > div:first-child {
@@ -97,7 +97,7 @@ button:disabled {
 
 .intro-band p:not(.eyebrow) {
   max-width: 680px;
-  color: #3f4f42;
+  color: #3d4f63;
   line-height: 1.6;
 }
 
@@ -106,7 +106,7 @@ button:disabled {
   grid-template-columns: auto auto auto auto auto;
   gap: 10px;
   align-items: center;
-  color: #273a2b;
+  color: #24384d;
 }
 
 .flow-grid span {
@@ -114,7 +114,7 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  border: 1px solid #c9d5c5;
+  border: 1px solid #c5d4e2;
   border-radius: 8px;
   background: #ffffff;
   padding: 0 12px;
@@ -132,7 +132,7 @@ button:disabled {
 
 .panel {
   background: #ffffff;
-  border: 1px solid #dce3da;
+  border: 1px solid #d9e2ec;
   border-radius: 8px;
   padding: clamp(18px, 3vw, 26px);
   display: grid;
@@ -150,7 +150,7 @@ button:disabled {
 }
 
 .inline-heading span {
-  color: #526255;
+  color: #506172;
   font-weight: 800;
 }
 
@@ -163,7 +163,7 @@ button:disabled {
 label {
   display: grid;
   gap: 7px;
-  color: #334238;
+  color: #314358;
   font-size: 0.93rem;
   font-weight: 750;
 }
@@ -173,25 +173,25 @@ select {
   width: 100%;
   min-height: 44px;
   box-sizing: border-box;
-  border: 1px solid #c8d1c5;
+  border: 1px solid #c4d1df;
   border-radius: 8px;
-  background: #fbfcfa;
-  color: #172019;
+  background: #fbfdff;
+  color: #17202a;
   padding: 0 12px;
   outline: none;
 }
 
 input:focus,
 select:focus {
-  border-color: #206b3a;
-  box-shadow: 0 0 0 3px rgba(32, 107, 58, 0.14);
+  border-color: #1f5f8f;
+  box-shadow: 0 0 0 3px rgba(31, 95, 143, 0.14);
 }
 
 .private-box {
   display: grid;
   gap: 14px;
-  border: 1px solid #bfd4b8;
-  background: #f2f8ef;
+  border: 1px solid #b9cfe5;
+  background: #f0f7fc;
   border-radius: 8px;
   padding: 16px;
 }
@@ -205,7 +205,7 @@ select:focus {
 
 .copy-row span {
   min-height: 42px;
-  border: 1px solid #c8d7c3;
+  border: 1px solid #c3d4e5;
   border-radius: 8px;
   background: white;
   padding: 10px 12px;
@@ -214,7 +214,7 @@ select:focus {
 
 .copy-row button {
   padding: 0;
-  background: #206b3a;
+  background: #1f5f8f;
   color: white;
 }
 
@@ -226,7 +226,7 @@ dl {
 }
 
 dt {
-  color: #526255;
+  color: #506172;
   font-weight: 800;
 }
 
@@ -253,9 +253,9 @@ dd {
 }
 
 .success {
-  color: #1d562f;
-  background: #edf8ee;
-  border: 1px solid #bee4c6;
+  color: #1f5278;
+  background: #edf6fc;
+  border: 1px solid #b8d8ef;
 }
 
 .offer-list {
@@ -268,10 +268,10 @@ dd {
   grid-template-columns: 1fr auto;
   gap: 14px;
   align-items: center;
-  border: 1px solid #dce3da;
+  border: 1px solid #d9e2ec;
   border-radius: 8px;
   padding: 16px;
-  background: #fbfcfa;
+  background: #fbfdff;
 }
 
 .offer-amount {
@@ -281,7 +281,7 @@ dd {
 
 .offer-card p:not(.offer-amount) {
   margin-top: 4px;
-  color: #334238;
+  color: #314358;
   font-weight: 800;
 }
 
@@ -292,9 +292,9 @@ dd {
 }
 
 .empty-state {
-  border: 1px dashed #c8d1c5;
+  border: 1px dashed #c4d1df;
   border-radius: 8px;
-  color: #526255;
+  color: #506172;
   padding: 18px;
   text-align: center;
 }
@@ -354,14 +354,14 @@ dd {
 .deposit-start {
   display: grid;
   gap: 16px;
-  border: 1px dashed #c8d1c5;
+  border: 1px dashed #c4d1df;
   border-radius: 8px;
   padding: 18px;
-  background: #fbfcfa;
+  background: #fbfdff;
 }
 
 .deposit-start p {
-  color: #3f4f42;
+  color: #3d4f63;
   line-height: 1.55;
 }
 
@@ -378,7 +378,7 @@ dd {
 
 .payment-qr {
   width: min(100%, 220px);
-  border: 1px solid #dce3da;
+  border: 1px solid #d9e2ec;
   border-radius: 8px;
   background: #ffffff;
   padding: 16px;
@@ -438,13 +438,13 @@ dd {
 
 .selected-offer-card {
   grid-template-columns: 1fr;
-  border-color: #206b3a;
-  background: #f4faf2;
-  box-shadow: 0 0 0 3px rgba(32, 107, 58, 0.12);
+  border-color: #1f5f8f;
+  background: #f2f8fd;
+  box-shadow: 0 0 0 3px rgba(31, 95, 143, 0.12);
 }
 
 .inline-take-form {
-  border-top: 1px solid #cfe0c9;
+  border-top: 1px solid #c9dceb;
   margin-top: 2px;
 }
 
@@ -453,7 +453,7 @@ dd {
 }
 
 .buyer-result > p:not(.eyebrow) {
-  color: #3f4f42;
+  color: #3d4f63;
   line-height: 1.55;
 }
 
@@ -466,7 +466,7 @@ dd {
 
 .topbar-subtitle {
   margin-top: 4px;
-  color: #526255;
+  color: #506172;
   font-weight: 800;
 }
 
@@ -509,11 +509,11 @@ dd {
 .custodian-release-box {
   grid-column: 1 / -1;
   border-color: #8bbf73;
-  background: #f4faf2;
+  background: #f2f8fd;
 }
 
 .custodian-release-box > p {
-  color: #3f4f42;
+  color: #3d4f63;
   line-height: 1.5;
 }
 
@@ -529,9 +529,9 @@ dd {
 
 .custodian-auth-row > span {
   min-height: 42px;
-  background: #edf8ee;
-  border-color: #bee4c6;
-  color: #1d562f;
+  background: #edf6fc;
+  border-color: #b8d8ef;
+  color: #1f5278;
 }
 
 .custodian-auth-box {
@@ -540,7 +540,7 @@ dd {
 
 .custodian-auth-box > p:not(.eyebrow),
 .seller-buyer-box > p:not(.eyebrow) {
-  color: #3f4f42;
+  color: #3d4f63;
   line-height: 1.5;
 }
 
@@ -558,9 +558,9 @@ dd {
 .custodian-session-pill button {
   min-height: 34px;
   padding: 0 10px;
-  background: #dfeade;
-  color: #1d562f;
-  border: 1px solid #bee4c6;
+  background: #dfeaf4;
+  color: #1f5278;
+  border: 1px solid #b8d8ef;
 }
 
 .brand-lockup {
@@ -578,9 +578,9 @@ dd {
   align-items: center;
   justify-content: center;
   flex: 0 0 auto;
-  background: #e8f3e6;
-  color: #206b3a;
-  border: 1px solid #c7dcc1;
+  background: #e7f1fa;
+  color: #1f5f8f;
+  border: 1px solid #c3d8eb;
 }
 
 .topbar-actions {
@@ -593,15 +593,15 @@ dd {
   width: 42px;
   min-width: 42px;
   padding: 0;
-  background: #eef3ec;
-  color: #1e3224;
-  border: 1px solid #cfdbcc;
+  background: #edf4fa;
+  color: #183247;
+  border: 1px solid #c9d7e5;
 }
 
 .active-custodian-button {
-  background: #206b3a;
+  background: #1f5f8f;
   color: #ffffff;
-  border-color: #206b3a;
+  border-color: #1f5f8f;
 }
 
 .auth-panel-band {
@@ -614,4 +614,33 @@ dd {
 
 .create-offer-button:hover:not(:disabled) {
   background: #184f78;
+}
+
+.wallet-download-link {
+  min-height: 42px;
+  border-radius: 8px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-weight: 800;
+  text-decoration: none;
+  background: #edf4fa;
+  color: #183247;
+  border: 1px solid #c9d7e5;
+}
+
+.wallet-download-link:hover {
+  background: #e2eef7;
+}
+
+@media (max-width: 640px) {
+  .topbar-actions {
+    justify-content: stretch;
+  }
+
+  .wallet-download-link {
+    flex: 1 1 auto;
+  }
 }
