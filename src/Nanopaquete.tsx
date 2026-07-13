@@ -24,6 +24,17 @@ const initialSellerForm = {
   sellerContact: '',
 }
 
+const sellerPaymentStorageKey = 'nanopaquete:seller-payment'
+
+const getStoredSellerPayment = () => {
+  try {
+    const value = window.localStorage.getItem(sellerPaymentStorageKey)
+    return value ? (JSON.parse(value) as SellerPaymentIntent) : null
+  } catch {
+    return null
+  }
+}
+
 const shortDate = (value: string) =>
   new Intl.DateTimeFormat('es-CO', {
     dateStyle: 'medium',
@@ -36,7 +47,7 @@ const openNanoPayment = (paymentUri: string) => {
 
 export function Nanopaquete() {
   const [sellerForm, setSellerForm] = useState(initialSellerForm)
-  const [sellerPayment, setSellerPayment] = useState<SellerPaymentIntent | null>(null)
+  const [sellerPayment, setSellerPayment] = useState<SellerPaymentIntent | null>(getStoredSellerPayment)
   const [escrowSession, setEscrowSession] = useState<EscrowSession | null>(null)
   const [publishedOffer, setPublishedOffer] = useState<PublishedOffer | null>(null)
   const [offers, setOffers] = useState<PublicOffer[]>([])
@@ -77,6 +88,15 @@ export function Nanopaquete() {
       ignore = true
     }
   }, [])
+
+  useEffect(() => {
+    if (sellerPayment) {
+      window.localStorage.setItem(sellerPaymentStorageKey, JSON.stringify(sellerPayment))
+      return
+    }
+
+    window.localStorage.removeItem(sellerPaymentStorageKey)
+  }, [sellerPayment])
 
   const updateSellerForm = (field: keyof typeof sellerForm, value: string) => {
     setSellerForm((current) => ({ ...current, [field]: value }))
