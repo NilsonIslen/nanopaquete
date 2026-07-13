@@ -22,6 +22,7 @@ export type PublicOffer = {
   isOwnOffer?: boolean
   canEditPrice?: boolean
   canConfirmPayment?: boolean
+  canCustodianReleaseOffer?: boolean
   sellerCountry?: string
   sellerDialCode?: string
   sellerContact?: string
@@ -189,6 +190,12 @@ export const cancelTakenOffer = (offerId: string, clientSessionId: string) =>
   requestJson<{ offer: PublicOffer }>(`/offers/${encodeURIComponent(offerId)}/cancel-take`, {
     method: 'POST',
     body: JSON.stringify({ clientSessionId }),
+  })
+
+export const releaseExpiredTakenOffer = (offerId: string, custodianSessionId: string) =>
+  requestJson<{ offer: PublicOffer }>(`/offers/${encodeURIComponent(offerId)}/release-expired-take`, {
+    method: 'POST',
+    body: JSON.stringify({ custodianSessionId }),
   })
 
 export const startReleaseFee = (offerId: string, clientSessionId: string) =>

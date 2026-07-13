@@ -7,6 +7,7 @@ import {
   getCustodians,
   getOffers,
   publishOffer,
+  releaseExpiredTakenOffer,
   startCustodianAuth,
   startReleaseFee,
   startSellerPayment,
@@ -449,6 +450,25 @@ export function Nanopaquete() {
       await loadOffers()
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'No se pudo validar la transferencia del custodio.')
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  const handleReleaseExpiredTakenOffer = async (offerId: string) => {
+    setError(null)
+    setLoading(`release-expired:${offerId}`)
+
+    try {
+      if (!custodianSession) {
+        setError('Autenticacion de custodio requerida.')
+        return
+      }
+      await releaseExpiredTakenOffer(offerId, custodianSession.sessionId)
+      if (takenOffer?.offer.id === offerId) setTakenOffer(null)
+      await loadOffers()
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'No se pudo liberar la oferta.')
     } finally {
       setLoading(null)
     }
@@ -929,6 +949,17 @@ export function Nanopaquete() {
                         <dt>Contacto comprador</dt>
                         <dd>{offer.buyerDialCode ? offer.buyerDialCode + ' ' : ''}{offer.buyerContact}</dd>
                       </dl>
+                      {offer.canCustodianReleaseOffer && (
+                        <button
+                          className="ghost-button danger-button"
+                          type="button"
+                          onClick={() => void handleReleaseExpiredTakenOffer(offer.id)}
+                          disabled={loading === `release-expired:${offer.id}`}
+                        >
+                          <X size={16} />
+                          {loading === `release-expired:${offer.id}` ? 'Liberando...' : 'Liberar oferta'}
+                        </button>
+                      )}
                     </div>
                   )}
                   {offer.status === 'RELEASING' && !offer.custodianReleaseUri && (

@@ -171,6 +171,7 @@ const sellerPaymentTtlMs = Number(process.env.NANOPAQUETE_SELLER_PAYMENT_TTL_MS 
 const releaseFeeTtlMs = Number(process.env.NANOPAQUETE_RELEASE_FEE_TTL_MS ?? 60 * 60 * 1000)
 const custodianAuthTtlMs = Number(process.env.NANOPAQUETE_CUSTODIAN_AUTH_TTL_MS ?? 15 * 60 * 1000)
 const custodianSessionTtlMs = Number(process.env.NANOPAQUETE_CUSTODIAN_SESSION_TTL_MS ?? 12 * 60 * 60 * 1000)
+const takenOfferCustodianReleaseMs = Number(process.env.NANOPAQUETE_TAKEN_OFFER_RELEASE_MS ?? 24 * 60 * 60 * 1000)
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const storePath = join(__dirname, 'data', 'nanopaquete.json')
 
@@ -291,6 +292,22 @@ const getValidCustodianSession = (store: Store, sessionId: string) => {
   return store.custodianSessions.find((session) => session.id === normalized)
 }
 
+const canCustodianReleaseTakenOffer = (offer: OfferRecord) =>
+  offer.status === 'NEGOTIATION' &&
+  Boolean(offer.takenAt) &&
+  Date.now() - new Date(offer.takenAt || '').getTime() >= takenOfferCustodianReleaseMs
+
+const releaseTakenOffer = (offer: OfferRecord) => {
+  offer.status = 'ACTIVE'
+  offer.buyerNanoAddress = undefined
+  offer.buyerCountry = undefined
+  offer.buyerDialCode = undefined
+  offer.buyerContact = undefined
+  offer.buyerSessionId = undefined
+  offer.takenAt = undefined
+  offer.releaseFeeIntentId = undefined
+}
+
 
 const publicOffer = (offer: OfferRecord, context: { clientSessionId?: string; custodianSession?: CustodianSession } = {}) => {
   const isSeller = Boolean(context.clientSessionId && offer.sellerSessionId && offer.sellerSessionId === context.clientSessionId)
@@ -306,6 +323,7 @@ const publicOffer = (offer: OfferRecord, context: { clientSessionId?: string; cu
     isOwnOffer: isSeller,
     canEditPrice: isSeller && offer.status === 'ACTIVE',
     canConfirmPayment: isSeller && offer.status === 'NEGOTIATION',
+    canCustodianReleaseOffer: isCustodian && canCustodianReleaseTakenOffer(offer),
     ...(isSeller && offer.status === 'NEGOTIATION' && offer.buyerContact
       ? {
           buyerCountry: offer.buyerCountry,
@@ -897,16 +915,54 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       return
     }
 
-    offer.status = 'ACTIVE'
-    offer.buyerNanoAddress = undefined
-    offer.buyerCountry = undefined
-    offer.buyerDialCode = undefined
-    offer.buyerContact = undefined
-    offer.buyerSessionId = undefined
-    offer.takenAt = undefined
+    releaseTakenOffer(offer)
     await writeStore(store)
 
     sendJson(response, 200, { offer: publicOffer(offer) })
+    return
+  }
+
+  const releaseExpiredTakeMatch = url.pathname.match(/^\/api\/offers\/([^/]+)\/release-expired-take$/)
+
+  if (request.method === 'POST' && releaseExpiredTakeMatch) {
+    const offerId = decodeURIComponent(releaseExpiredTakeMatch[1])
+    const body = await readJsonBody(request)
+    const custodianSessionId = normalizeClientSessionId(body.custodianSessionId)
+    const store = await readStore()
+
+    const custodianSession = getValidCustodianSession(store, custodianSessionId)
+    if (!custodianSession) {
+      await writeStore(store)
+      sendJson(response, 403, { error: 'Autenticacion de custodio preautorizado requerida.' })
+      return
+    }
+
+    const offer = store.offers.find((item) => item.id === offerId)
+
+    if (!offer) {
+      sendJson(response, 404, { error: 'La oferta no existe.' })
+      return
+    }
+
+    if (offer.custodianId !== custodianSession.custodianId) {
+      sendJson(response, 403, { error: 'Esta oferta pertenece a otro custodio.' })
+      return
+    }
+
+    if (offer.status !== 'NEGOTIATION') {
+      sendJson(response, 409, { error: 'Esta oferta no esta en negociacion.' })
+      return
+    }
+
+    if (!canCustodianReleaseTakenOffer(offer)) {
+      sendJson(response, 409, { error: 'El custodio solo puede liberar la oferta despues de 24 horas sin cierre ni cancelacion.' })
+      return
+    }
+
+    releaseTakenOffer(offer)
+    await writeStore(store)
+
+    sendJson(response, 200, { offer: publicOffer(offer, { custodianSession }) })
     return
   }
 
