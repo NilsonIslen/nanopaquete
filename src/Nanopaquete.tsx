@@ -632,7 +632,7 @@ export function Nanopaquete() {
               <label>
                 Contacto privado
                 <input
-                  placeholder="3008188284 o @usuario Telegram"
+                  placeholder="Ej. 3120000000 o @usuario"
                   value={sellerForm.sellerContact}
                   onChange={(event) => updateSellerForm('sellerContact', event.target.value)}
                   required
@@ -811,7 +811,7 @@ export function Nanopaquete() {
                       <label>
                         Contacto privado
                         <input
-                          placeholder="3008188284 o @usuario Telegram"
+                          placeholder="Ej. 3120000000 o @usuario"
                           value={buyerForm.contact}
                           onChange={(event) => updateBuyerForm('contact', event.target.value)}
                           required
