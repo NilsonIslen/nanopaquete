@@ -709,9 +709,6 @@ export function Nanopaquete() {
                   ))}
                 </select>
               </label>
-              <p>
-                Transfiere a la cuenta de custodia la cantidad exacta de XNO que quieres vender.
-              </p>
               <button className="primary-button create-offer-button" type="button" onClick={handleStartSellerPayment} disabled={loading === 'start-payment' || !selectedCustodianId}>
                 <Wallet size={18} />
                 Crear oferta
