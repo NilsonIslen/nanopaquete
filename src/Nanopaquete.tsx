@@ -878,6 +878,7 @@ export function Nanopaquete() {
           <div className="panel-heading">
             <h2>Crear oferta</h2>
             <p>Vas a poner en venta la cantidad de XNO que deposites en custodia. Primero transfiere el monto exacto al custodio seleccionado; cuando Nanopaquete detecte el depósito, podrás indicar qué activo y cuánto esperas recibir a cambio.</p>
+            <p>Este proceso es irreversible desde esta pantalla. Si después necesitas reembolsar los fondos de la oferta, debes simular una compra desde otro dispositivo y pagar la comisión de 0,01 XNO para que el custodio pueda liberarlos.</p>
           </div>
 
           {!sellerPayment && !escrowSession && (
