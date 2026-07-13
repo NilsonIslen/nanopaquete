@@ -3,6 +3,7 @@ import { ArrowRight, CheckCircle2, Copy, RefreshCw, ShieldCheck, Wallet, X } fro
 import { QRCodeSVG } from 'qrcode.react'
 import {
   cancelTakenOffer,
+  getBuyerNegotiation,
   getOffers,
   publishOffer,
   startSellerPayment,
@@ -113,9 +114,11 @@ export function Nanopaquete() {
   useEffect(() => {
     let ignore = false
 
-    getOffers()
-      .then((response) => {
-        if (!ignore) setOffers(response.offers)
+    Promise.all([getOffers(), getBuyerNegotiation(clientSessionId)])
+      .then(([offersResponse, negotiationResponse]) => {
+        if (ignore) return
+        setOffers(offersResponse.offers)
+        if (negotiationResponse.negotiation) setTakenOffer(negotiationResponse.negotiation)
       })
       .catch((requestError) => {
         if (!ignore) {
@@ -126,7 +129,7 @@ export function Nanopaquete() {
     return () => {
       ignore = true
     }
-  }, [])
+  }, [clientSessionId])
 
   useEffect(() => {
     if (sellerPayment) {
@@ -217,6 +220,10 @@ export function Nanopaquete() {
   const handleTakeOffer = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!selectedOffer) return
+    if (takenOffer) {
+      setError('Ya tienes una negociacion abierta. Cancela o cierra esa negociacion antes de tomar otra oferta.')
+      return
+    }
     setError(null)
     setLoading('take')
 
@@ -447,7 +454,16 @@ export function Nanopaquete() {
                     <small>Publicada {shortDate(offer.createdAt)}</small>
                   </div>
                   {!isSelected && (
-                    <button type="button" onClick={() => setSelectedOffer(offer)}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (takenOffer) {
+                          setError('Ya tienes una negociacion abierta. Cancela o cierra esa negociacion antes de tomar otra oferta.')
+                          return
+                        }
+                        setSelectedOffer(offer)
+                      }}
+                    >
                       Tomar oferta
                     </button>
                   )}

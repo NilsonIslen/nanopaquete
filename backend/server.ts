@@ -235,6 +235,13 @@ const publicOffer = (offer: OfferRecord) => ({
   createdAt: offer.createdAt,
 })
 
+const takenOfferResponse = (offer: OfferRecord) => ({
+  offer: publicOffer(offer),
+  sellerContact: offer.sellerContact,
+  sellerCountry: offer.sellerCountry,
+  sellerDialCode: offer.sellerDialCode,
+})
+
 const escrowSessionResponse = (escrow: EscrowRecord) => ({
   escrowId: escrow.id,
   publishToken: escrow.publishToken,
@@ -333,6 +340,17 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
   if (request.method === 'GET' && url.pathname === '/api/offers') {
     const store = await readStore()
     sendJson(response, 200, { offers: store.offers.filter((offer) => offer.status === 'ACTIVE').map(publicOffer) })
+    return
+  }
+
+  if (request.method === 'GET' && url.pathname === '/api/buyer-negotiation') {
+    const clientSessionId = normalizeClientSessionId(url.searchParams.get('clientSessionId'))
+    const store = await readStore()
+    const offer = store.offers.find(
+      (item) => item.status === 'NEGOTIATION' && item.buyerSessionId === clientSessionId,
+    )
+
+    sendJson(response, 200, { negotiation: offer ? takenOfferResponse(offer) : null })
     return
   }
 
@@ -542,18 +560,22 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       return
     }
 
+    const currentNegotiation = store.offers.find(
+      (item) => item.status === 'NEGOTIATION' && item.buyerSessionId === clientSessionId,
+    )
+
+    if (currentNegotiation) {
+      sendJson(response, 409, { error: 'Ya tienes una negociacion abierta. Cancela o cierra esa negociacion antes de tomar otra oferta.' })
+      return
+    }
+
     offer.status = 'NEGOTIATION'
     offer.buyerNanoAddress = buyerNanoAddress
     offer.buyerSessionId = clientSessionId || undefined
     offer.takenAt = new Date().toISOString()
     await writeStore(store)
 
-    sendJson(response, 200, {
-      offer: publicOffer(offer),
-      sellerContact: offer.sellerContact,
-      sellerCountry: offer.sellerCountry,
-      sellerDialCode: offer.sellerDialCode,
-    })
+    sendJson(response, 200, takenOfferResponse(offer))
     return
   }
 

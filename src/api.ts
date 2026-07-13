@@ -89,6 +89,11 @@ async function requestJson<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const getOffers = () => requestJson<{ offers: PublicOffer[] }>('/offers')
 
+export const getBuyerNegotiation = (clientSessionId: string) =>
+  requestJson<{ negotiation: TakenOffer | null }>(
+    `/buyer-negotiation?clientSessionId=${encodeURIComponent(clientSessionId)}`,
+  )
+
 export const startSellerPayment = (clientSessionId: string) =>
   requestJson<SellerPaymentIntent>('/seller-payments', {
     method: 'POST',
