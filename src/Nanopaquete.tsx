@@ -25,6 +25,19 @@ const initialSellerForm = {
 }
 
 const sellerPaymentStorageKey = 'nanopaquete:seller-payment'
+const clientSessionStorageKey = 'nanopaquete:client-session'
+
+const createClientSessionId = () =>
+  crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2)
+
+const getClientSessionId = () => {
+  const stored = window.localStorage.getItem(clientSessionStorageKey)
+  if (stored) return stored
+
+  const created = createClientSessionId()
+  window.localStorage.setItem(clientSessionStorageKey, created)
+  return created
+}
 
 const getStoredSellerPayment = () => {
   try {
@@ -56,6 +69,7 @@ export function Nanopaquete() {
   const [takenOffer, setTakenOffer] = useState<TakenOffer | null>(null)
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [clientSessionId] = useState(getClientSessionId)
 
   const loadOffers = async () => {
     setError(null)
@@ -109,7 +123,7 @@ export function Nanopaquete() {
     setLoading('start-payment')
 
     try {
-      const intent = await startSellerPayment()
+      const intent = await startSellerPayment(clientSessionId)
       setSellerPayment(intent)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'No se pudo iniciar el deposito.')
@@ -124,7 +138,7 @@ export function Nanopaquete() {
     setLoading('verify-payment')
 
     try {
-      const session = await verifySellerPayment(sellerPayment.intentId)
+      const session = await verifySellerPayment(sellerPayment.intentId, clientSessionId)
       setEscrowSession(session)
       setSellerPayment(null)
     } catch (requestError) {
@@ -253,6 +267,8 @@ export function Nanopaquete() {
               <dl>
                 <dt>Wallet custodia</dt>
                 <dd>{sellerPayment.receiverAddress}</dd>
+                <dt>Sesion local</dt>
+                <dd>{clientSessionId.slice(0, 8)}</dd>
                 <dt>Vence</dt>
                 <dd>{shortDate(sellerPayment.expiresAt)}</dd>
                 <dt>Contacto custodio</dt>

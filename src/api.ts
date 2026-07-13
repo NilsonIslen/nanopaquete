@@ -87,16 +87,16 @@ async function requestJson<T>(path: string, options?: RequestInit): Promise<T> {
 
 export const getOffers = () => requestJson<{ offers: PublicOffer[] }>('/offers')
 
-export const startSellerPayment = () =>
+export const startSellerPayment = (clientSessionId: string) =>
   requestJson<SellerPaymentIntent>('/seller-payments', {
     method: 'POST',
-    body: JSON.stringify({}),
+    body: JSON.stringify({ clientSessionId }),
   })
 
-export const verifySellerPayment = (intentId: string) =>
+export const verifySellerPayment = (intentId: string, clientSessionId: string) =>
   requestJson<EscrowSession>(`/seller-payments/${encodeURIComponent(intentId)}/verify`, {
     method: 'POST',
-    body: JSON.stringify({}),
+    body: JSON.stringify({ clientSessionId }),
   })
 
 export const publishOffer = (payload: PublishOfferPayload) =>

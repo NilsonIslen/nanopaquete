@@ -16,6 +16,7 @@ type SellerPaymentIntent = {
   receiverAddress: string
   status: 'PENDING' | 'VERIFIED' | 'EXPIRED'
   clientIp: string
+  clientSessionId?: string
   createdAt: string
   expiresAt: string
   paymentHash?: string
@@ -32,6 +33,7 @@ type EscrowRecord = {
   sellerWallet: string
   status: 'PENDING' | 'PUBLISHED'
   clientIp: string
+  clientSessionId?: string
   createdAt: string
 }
 
@@ -210,6 +212,8 @@ const writeStore = async (store: Store) => {
 }
 
 const normalizeText = (value: unknown) => String(value ?? '').trim()
+const normalizeClientSessionId = (value: unknown) =>
+  normalizeText(value).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80)
 const isCurrency = (value: string): value is Currency => currencies.includes(value as Currency)
 
 const createCode = (digits: number) => {
@@ -240,8 +244,12 @@ const escrowSessionResponse = (escrow: EscrowRecord) => ({
   custodyFeeXno,
 })
 
-const findRecoverableEscrow = (store: Store) =>
-  store.escrows.find((escrow) => escrow.status === 'PENDING')
+const findRecoverableEscrow = (store: Store, clientSessionId: string) =>
+  clientSessionId
+    ? store.escrows.find(
+        (escrow) => escrow.status === 'PENDING' && escrow.clientSessionId === clientSessionId,
+      )
+    : undefined
 
 const statusLabel = (status: OfferStatus) =>
   ({
@@ -325,6 +333,8 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
   }
 
   if (request.method === 'POST' && url.pathname === '/api/seller-payments') {
+    const body = await readJsonBody(request)
+    const clientSessionId = normalizeClientSessionId(body.clientSessionId)
     const store = await readStore()
     const now = Date.now()
     store.sellerPaymentIntents = store.sellerPaymentIntents.filter(
@@ -335,6 +345,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       receiverAddress: escrowWallet,
       status: 'PENDING',
       clientIp: getClientIp(request),
+      clientSessionId: clientSessionId || undefined,
       createdAt: new Date(now).toISOString(),
       expiresAt: new Date(now + sellerPaymentTtlMs).toISOString(),
     }
@@ -354,12 +365,19 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
   const verifyPaymentMatch = url.pathname.match(/^\/api\/seller-payments\/([^/]+)\/verify$/)
 
   if (request.method === 'POST' && verifyPaymentMatch) {
+    const body = await readJsonBody(request)
+    const clientSessionId = normalizeClientSessionId(body.clientSessionId)
     const intentId = decodeURIComponent(verifyPaymentMatch[1])
     const store = await readStore()
     const intent = store.sellerPaymentIntents.find((item) => item.id === intentId)
 
     if (!intent) {
       sendJson(response, 404, { error: 'Solicitud de deposito no encontrada.' })
+      return
+    }
+
+    if (intent.clientSessionId && intent.clientSessionId !== clientSessionId) {
+      sendJson(response, 403, { error: 'Esta solicitud de deposito pertenece a otra sesion local.' })
       return
     }
 
@@ -401,6 +419,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
         sellerWallet: payment.senderWallet,
         status: 'PENDING',
         clientIp: intent.clientIp,
+        clientSessionId: intent.clientSessionId,
         createdAt: new Date().toISOString(),
       }
 
@@ -414,7 +433,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
 
       sendJson(response, 200, escrowSessionResponse(escrow))
     } catch (error) {
-      const recoverableEscrow = findRecoverableEscrow(store)
+      const recoverableEscrow = findRecoverableEscrow(store, clientSessionId)
 
       if (recoverableEscrow) {
         sendJson(response, 200, escrowSessionResponse(recoverableEscrow))
