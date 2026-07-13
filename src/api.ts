@@ -81,6 +81,7 @@ export type TakenOffer = {
   sellerContact: string
   sellerCountry?: string
   sellerDialCode?: string
+  custodianContact: string
 }
 
 export type CustodianAuthIntent = {

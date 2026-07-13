@@ -326,6 +326,7 @@ const takenOfferResponse = (offer: OfferRecord) => ({
   sellerContact: offer.sellerContact,
   sellerCountry: offer.sellerCountry,
   sellerDialCode: offer.sellerDialCode,
+  custodianContact: getCustodianById(offer.custodianId).contact,
 })
 
 const escrowSessionResponse = (escrow: EscrowRecord) => {

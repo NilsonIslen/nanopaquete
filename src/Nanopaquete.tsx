@@ -167,6 +167,7 @@ export function Nanopaquete() {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [clientSessionId] = useState(getClientSessionId)
   const visibleOffers = takenOffer ? [takenOffer.offer] : sortOffers(offers, Boolean(custodianSession))
+  const takenOfferId = takenOffer?.offer.id
 
   const loadOffers = async () => {
     setError(null)
@@ -221,6 +222,18 @@ export function Nanopaquete() {
       ignore = true
     }
   }, [clientSessionId, custodianSession?.sessionId])
+
+  useEffect(() => {
+    if (!takenOfferId) return undefined
+
+    const interval = window.setInterval(() => {
+      getBuyerNegotiation(clientSessionId)
+        .then((response) => setTakenOffer(response.negotiation))
+        .catch(() => undefined)
+    }, 10000)
+
+    return () => window.clearInterval(interval)
+  }, [clientSessionId, takenOfferId])
 
   useEffect(() => {
     if (sellerPayment) {
@@ -1010,14 +1023,29 @@ export function Nanopaquete() {
 
           {takenOffer && (
             <div className="private-box buyer-result">
-              <p className="eyebrow">Negociacion iniciada</p>
-              <h3>Comunicate con el vendedor para acordar como haras el pago.</h3>
-              <p>Los XNO de esta oferta ya estan bloqueados en custodia. El vendedor solo puede liberar a la cuenta que registraste cuando reciba el pago.</p>
+              <p className="eyebrow">{takenOffer.offer.status === 'RELEASING' ? 'Pago confirmado' : 'Negociacion iniciada'}</p>
+              {takenOffer.offer.status === 'RELEASING' ? (
+                <>
+                  <h3>El vendedor ya confirmo que recibio el pago.</h3>
+                  <p>La liberacion de los XNO esta pendiente del custodio. Si se tarda, comunicate con el custodio para consultar el estado.</p>
+                </>
+              ) : (
+                <>
+                  <h3>Comunicate con el vendedor para acordar como haras el pago.</h3>
+                  <p>Los XNO de esta oferta ya estan bloqueados en custodia. El vendedor solo puede liberar a la cuenta que registraste cuando reciba el pago.</p>
+                </>
+              )}
               <dl>
                 <dt>Pais vendedor</dt>
                 <dd>{takenOffer.sellerCountry || 'No informado'}</dd>
                 <dt>Contacto vendedor</dt>
                 <dd>{takenOffer.sellerDialCode ? takenOffer.sellerDialCode + ' ' : ''}{takenOffer.sellerContact}</dd>
+                {takenOffer.offer.status === 'RELEASING' && (
+                  <>
+                    <dt>Contacto custodio</dt>
+                    <dd>{takenOffer.custodianContact}</dd>
+                  </>
+                )}
                 <dt>Oferta tomada</dt>
                 <dd>{takenOffer.offer.amountXno} XNO por {takenOffer.offer.price} {takenOffer.offer.currency}</dd>
               </dl>
