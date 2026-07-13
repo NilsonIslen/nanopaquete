@@ -26,6 +26,7 @@ const initialSellerForm = {
 }
 
 const sellerPaymentStorageKey = 'nanopaquete:seller-payment'
+const takenOfferStorageKey = 'nanopaquete:taken-offer'
 const clientSessionStorageKey = 'nanopaquete:client-session'
 
 const createClientSessionId = () =>
@@ -49,6 +50,15 @@ const getStoredSellerPayment = () => {
   }
 }
 
+const getStoredTakenOffer = () => {
+  try {
+    const value = window.localStorage.getItem(takenOfferStorageKey)
+    return value ? (JSON.parse(value) as TakenOffer) : null
+  } catch {
+    return null
+  }
+}
+
 const shortDate = (value: string) =>
   new Intl.DateTimeFormat('es-CO', {
     dateStyle: 'medium',
@@ -67,7 +77,7 @@ export function Nanopaquete() {
   const [offers, setOffers] = useState<PublicOffer[]>([])
   const [selectedOffer, setSelectedOffer] = useState<PublicOffer | null>(null)
   const [buyerNanoAddress, setBuyerNanoAddress] = useState('')
-  const [takenOffer, setTakenOffer] = useState<TakenOffer | null>(null)
+  const [takenOffer, setTakenOffer] = useState<TakenOffer | null>(getStoredTakenOffer)
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [clientSessionId] = useState(getClientSessionId)
@@ -112,6 +122,15 @@ export function Nanopaquete() {
 
     window.localStorage.removeItem(sellerPaymentStorageKey)
   }, [sellerPayment])
+
+  useEffect(() => {
+    if (takenOffer) {
+      window.localStorage.setItem(takenOfferStorageKey, JSON.stringify(takenOffer))
+      return
+    }
+
+    window.localStorage.removeItem(takenOfferStorageKey)
+  }, [takenOffer])
 
   const updateSellerForm = (field: keyof typeof sellerForm, value: string) => {
     setSellerForm((current) => ({ ...current, [field]: value }))
