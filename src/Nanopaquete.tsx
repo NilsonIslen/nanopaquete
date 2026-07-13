@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { ArrowRight, CheckCircle2, Copy, RefreshCw, ShieldCheck, Wallet } from 'lucide-react'
+import { ArrowRight, CheckCircle2, Copy, RefreshCw, ShieldCheck, Wallet, X } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import {
   cancelTakenOffer,
@@ -152,6 +152,11 @@ export function Nanopaquete() {
     }
   }
 
+  const handleCancelSellerPayment = () => {
+    setSellerPayment(null)
+    setError(null)
+  }
+
   const handleVerifySellerPayment = async () => {
     if (!sellerPayment) return
     setError(null)
@@ -236,7 +241,7 @@ export function Nanopaquete() {
     <main className="app-shell">
       <header className="topbar">
         <div>
-          <p className="eyebrow">Custodia manual para XNO</p>
+          <p className="eyebrow">Custodia de Nano para comercio P2P</p>
           <h1>Nanopaquete</h1>
         </div>
         <button className="ghost-button" type="button" onClick={loadOffers} disabled={loading === 'offers'}>
@@ -295,6 +300,10 @@ export function Nanopaquete() {
                 <button className="ghost-button" type="button" onClick={() => void copyValue(sellerPayment.receiverAddress)}>
                   <Copy size={16} />
                   Copiar wallet
+                </button>
+                <button className="ghost-button danger-button" type="button" onClick={handleCancelSellerPayment}>
+                  <X size={16} />
+                  Cancelar
                 </button>
               </div>
               <div className="payment-qr" aria-label="QR de pago Nano">
