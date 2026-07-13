@@ -1100,10 +1100,14 @@ export function Nanopaquete() {
                 </>
               )}
               <dl>
-                <dt>Pais vendedor</dt>
-                <dd>{takenOffer.sellerCountry || 'No informado'}</dd>
-                <dt>Contacto vendedor</dt>
-                <dd>{takenOffer.sellerDialCode ? takenOffer.sellerDialCode + ' ' : ''}{takenOffer.sellerContact}</dd>
+                {takenOffer.offer.status === 'NEGOTIATION' && (
+                  <>
+                    <dt>Pais vendedor</dt>
+                    <dd>{takenOffer.sellerCountry || 'No informado'}</dd>
+                    <dt>Contacto vendedor</dt>
+                    <dd>{takenOffer.sellerDialCode ? takenOffer.sellerDialCode + ' ' : ''}{takenOffer.sellerContact}</dd>
+                  </>
+                )}
                 <dt>Contacto custodio</dt>
                 <dd>{takenOffer.custodianContact}</dd>
                 <dt>Oferta tomada</dt>
