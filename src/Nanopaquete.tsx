@@ -288,7 +288,6 @@ export function Nanopaquete() {
       <section className="work-grid">
         <div className="panel seller-panel">
           <div className="panel-heading">
-            <p className="eyebrow">Vendedor</p>
             <h2>Crear oferta</h2>
           </div>
 
@@ -436,7 +435,6 @@ export function Nanopaquete() {
         <div className="panel offers-panel">
           <div className="panel-heading inline-heading">
             <div>
-              <p className="eyebrow">Comprador</p>
               <h2>Ofertas disponibles</h2>
             </div>
             <span>{offers.length} activas</span>
@@ -503,7 +501,7 @@ export function Nanopaquete() {
             <div className="private-box buyer-result">
               <p className="eyebrow">Negociacion iniciada</p>
               <h3>Comunicate con el vendedor para acordar como haras el pago.</h3>
-              <p>Los XNO de esta oferta ya estan bloqueados en custodia. El vendedor solo puede pedir que se liberen a la wallet Nano que registraste cuando reciba tu pago.</p>
+              <p>Los XNO de esta oferta ya estan bloqueados en custodia. El vendedor solo puede liberar a la cuenta que registraste cuando reciba el pago.</p>
               <dl>
                 <dt>Pais vendedor</dt>
                 <dd>{takenOffer.sellerCountry || 'No informado'}</dd>
