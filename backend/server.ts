@@ -304,7 +304,7 @@ const publicOffer = (offer: OfferRecord, context: { clientSessionId?: string; cu
     status: offer.status,
     createdAt: offer.createdAt,
     isOwnOffer: isSeller,
-    canEditPrice: isSeller && ['ACTIVE', 'NEGOTIATION'].includes(offer.status),
+    canEditPrice: isSeller && offer.status === 'ACTIVE',
     canConfirmPayment: isSeller && offer.status === 'NEGOTIATION',
     ...(isSeller && offer.status === 'NEGOTIATION' && offer.buyerContact
       ? {
@@ -789,7 +789,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       return
     }
 
-    if (!['ACTIVE', 'NEGOTIATION'].includes(offer.status)) {
+    if (offer.status !== 'ACTIVE') {
       sendJson(response, 409, { error: 'Esta oferta ya no permite editar el precio.' })
       return
     }
@@ -831,6 +831,11 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
 
     if (offer.status !== 'ACTIVE') {
       sendJson(response, 409, { error: 'Esta oferta ya no esta disponible.' })
+      return
+    }
+
+    if (offer.sellerSessionId && offer.sellerSessionId === clientSessionId) {
+      sendJson(response, 403, { error: 'No puedes tomar una oferta que publicaste desde esta sesion.' })
       return
     }
 

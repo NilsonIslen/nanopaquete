@@ -893,7 +893,7 @@ export function Nanopaquete() {
                       </div>
                     </div>
                   )}
-                  {!isSelected && offer.status === 'ACTIVE' && (
+                  {!isSelected && offer.status === 'ACTIVE' && !offer.isOwnOffer && (
                     <button
                       type="button"
                       onClick={() => {
