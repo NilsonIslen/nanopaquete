@@ -9,6 +9,7 @@ import {
   startReleaseFee,
   startSellerPayment,
   takeOffer,
+  verifyCustodianRelease,
   verifyReleaseFee,
   verifySellerPayment,
   type Currency,
@@ -275,6 +276,22 @@ export function Nanopaquete() {
     }
   }
 
+  const handleVerifyCustodianRelease = async (offerId: string) => {
+    setError(null)
+    setLoading(`custodian-release:${offerId}`)
+
+    try {
+      await verifyCustodianRelease(offerId)
+      if (takenOffer?.offer.id === offerId) setTakenOffer(null)
+      setOffers((currentOffers) => currentOffers.filter((offer) => offer.id !== offerId))
+      await loadOffers()
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'No se pudo validar la transferencia del custodio.')
+    } finally {
+      setLoading(null)
+    }
+  }
+
   const handleCancelTakenOffer = async () => {
     if (!takenOffer) return
     setError(null)
@@ -507,6 +524,15 @@ export function Nanopaquete() {
                             <button className="primary-button" type="button" onClick={() => openNanoPayment(offer.custodianReleaseUri || '')}>
                               <Wallet size={18} />
                               Transferir al comprador
+                            </button>
+                            <button
+                              className="ghost-button"
+                              type="button"
+                              onClick={() => void handleVerifyCustodianRelease(offer.id)}
+                              disabled={loading === `custodian-release:${offer.id}`}
+                            >
+                              <CheckCircle2 size={16} />
+                              {loading === `custodian-release:${offer.id}` ? 'Verificando...' : 'Verificar liberacion'}
                             </button>
                           </div>
                           <div className="payment-qr" aria-label="QR para transferir al comprador">

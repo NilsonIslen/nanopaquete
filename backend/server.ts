@@ -57,13 +57,14 @@ type OfferRecord = {
   releaseFeeIntentId?: string
   releaseFeeHash?: string
   releaseRequestedAt?: string
+  custodianReleaseHash?: string
   closedAt?: string
   adminNote?: string
 }
 
 type UsedPayment = {
   hash: string
-  purpose: 'seller_deposit' | 'release_fee'
+  purpose: 'seller_deposit' | 'release_fee' | 'custodian_release'
   createdAt: string
 }
 
@@ -341,6 +342,7 @@ const renderAdmin = (offers: OfferRecord[]) => `<!doctype html>
               <dt>Creada</dt><dd>${escapeHtml(offer.createdAt)}</dd>
               <dt>Tomada</dt><dd>${escapeHtml(offer.takenAt)}</dd>
               <dt>Solicito liberacion</dt><dd>${escapeHtml(offer.releaseRequestedAt)}</dd>
+              <dt>Hash liberacion custodia</dt><dd>${escapeHtml(offer.custodianReleaseHash)}</dd>
               <dt>Nota admin</dt><dd>${escapeHtml(offer.adminNote)}</dd>
             </dl>
             <form method="post" action="/admin/offers/${encodeURIComponent(offer.id)}/status">
@@ -698,6 +700,57 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     offer.releaseFeeIntentId = intent.id
     await writeStore(store)
     sendJson(response, 201, intent)
+    return
+  }
+
+  const verifyCustodianReleaseMatch = url.pathname.match(/^\/api\/offers\/([^/]+)\/verify-custodian-release$/)
+
+  if (request.method === 'POST' && verifyCustodianReleaseMatch) {
+    const offerId = decodeURIComponent(verifyCustodianReleaseMatch[1])
+    const store = await readStore()
+    const offer = store.offers.find((item) => item.id === offerId)
+
+    if (!offer) {
+      sendJson(response, 404, { error: 'La oferta no existe.' })
+      return
+    }
+
+    if (offer.status === 'RELEASED') {
+      sendJson(response, 200, { offer: publicOffer(offer), paymentHash: offer.custodianReleaseHash })
+      return
+    }
+
+    if (offer.status !== 'RELEASING') {
+      sendJson(response, 409, { error: 'Solo se puede verificar una oferta en estado liberando.' })
+      return
+    }
+
+    if (!offer.buyerNanoAddress) {
+      sendJson(response, 409, { error: 'Esta oferta no tiene wallet compradora registrada.' })
+      return
+    }
+
+    try {
+      const payment = await findIncomingPaymentBySenderAmount({
+        receiverWallet: offer.buyerNanoAddress,
+        senderWallet: escrowWallet,
+        amountNano: offer.amountXno,
+        createdAfter: offer.releaseRequestedAt,
+        excludedHashes: store.usedPayments.map((item) => item.hash),
+      })
+
+      offer.status = 'RELEASED'
+      offer.custodianReleaseHash = payment.hash
+      offer.closedAt = new Date().toISOString()
+      store.usedPayments.push({ hash: payment.hash, purpose: 'custodian_release', createdAt: new Date().toISOString() })
+      await writeStore(store)
+      sendJson(response, 200, { offer: publicOffer(offer), paymentHash: payment.hash })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No se pudo validar la liberacion del custodio.'
+      sendJson(response, 422, {
+        error: message.replace('wallet vendedora', 'wallet de custodia'),
+      })
+    }
     return
   }
 

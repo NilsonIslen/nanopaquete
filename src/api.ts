@@ -148,3 +148,9 @@ export const verifyReleaseFee = (intentId: string) =>
     method: 'POST',
     body: JSON.stringify({}),
   })
+
+export const verifyCustodianRelease = (offerId: string) =>
+  requestJson<{ offer: PublicOffer; paymentHash?: string }>(`/offers/${encodeURIComponent(offerId)}/verify-custodian-release`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  })
