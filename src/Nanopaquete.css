@@ -469,3 +469,13 @@ dd {
   color: #526255;
   font-weight: 800;
 }
+
+.compact-intro-band {
+  grid-template-columns: 1fr;
+  padding-top: 18px;
+  padding-bottom: 18px;
+}
+
+.compact-intro-band .flow-grid {
+  justify-content: start;
+}

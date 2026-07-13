@@ -250,15 +250,7 @@ export function Nanopaquete() {
         </button>
       </header>
 
-      <section className="intro-band">
-        <div>
-          <p className="eyebrow">Compra y venta P2P</p>
-          <h2>Transfiere XNO a custodia y publica la oferta desde el pago confirmado.</h2>
-          <p>
-            La cantidad en venta la define la transferencia Nano. Cuando el deposito se confirma, se habilita
-            el formulario para divisa, precio y contacto privado del vendedor.
-          </p>
-        </div>
+      <section className="intro-band compact-intro-band">
         <div className="flow-grid" aria-label="Flujo principal">
           <span><ShieldCheck size={18} /> Deposito</span>
           <ArrowRight size={18} />
