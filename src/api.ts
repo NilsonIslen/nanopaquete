@@ -20,6 +20,7 @@ export type PublicOffer = {
   status: OfferStatus
   createdAt: string
   isOwnOffer?: boolean
+  canEditPrice?: boolean
   canConfirmPayment?: boolean
   buyerCountry?: string
   buyerDialCode?: string
@@ -164,6 +165,12 @@ export const verifySellerPayment = (intentId: string, clientSessionId: string) =
 
 export const publishOffer = (payload: PublishOfferPayload) =>
   requestJson<PublishedOffer>('/offers', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+
+export const updateOfferPrice = (offerId: string, payload: { price: string; clientSessionId: string }) =>
+  requestJson<{ offer: PublicOffer }>(`/offers/${encodeURIComponent(offerId)}/price`, {
     method: 'POST',
     body: JSON.stringify(payload),
   })

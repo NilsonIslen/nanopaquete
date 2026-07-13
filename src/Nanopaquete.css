@@ -717,3 +717,15 @@ dd {
     min-width: min(82vw, 300px);
   }
 }
+
+.inline-price-form {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid #c9dceb;
+  padding-top: 14px;
+}
+
+.inline-price-form .button-row {
+  justify-content: flex-start;
+}

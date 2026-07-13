@@ -304,6 +304,7 @@ const publicOffer = (offer: OfferRecord, context: { clientSessionId?: string; cu
     status: offer.status,
     createdAt: offer.createdAt,
     isOwnOffer: isSeller,
+    canEditPrice: isSeller && ['ACTIVE', 'NEGOTIATION'].includes(offer.status),
     canConfirmPayment: isSeller && offer.status === 'NEGOTIATION',
     ...(isSeller && offer.status === 'NEGOTIATION' && offer.buyerContact
       ? {
@@ -759,6 +760,43 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       const custodian = getCustodianById(offer.custodianId)
       sendJson(response, 201, { offer: publicOffer(offer), sellerPrivateCode: offer.sellerPrivateCode, custodianContact: custodian.contact, custodyFeeXno })
     }
+    return
+  }
+
+  const priceMatch = url.pathname.match(/^\/api\/offers\/([^/]+)\/price$/)
+
+  if (request.method === 'POST' && priceMatch) {
+    const offerId = decodeURIComponent(priceMatch[1])
+    const body = await readJsonBody(request)
+    const clientSessionId = normalizeClientSessionId(body.clientSessionId)
+    const price = normalizeText(body.price)
+
+    if (!price) {
+      sendJson(response, 400, { error: 'Ingresa el nuevo precio.' })
+      return
+    }
+
+    const store = await readStore()
+    const offer = store.offers.find((item) => item.id === offerId)
+
+    if (!offer) {
+      sendJson(response, 404, { error: 'La oferta no existe.' })
+      return
+    }
+
+    if (!offer.sellerSessionId || offer.sellerSessionId !== clientSessionId) {
+      sendJson(response, 403, { error: 'Solo la sesion vendedora puede editar el precio.' })
+      return
+    }
+
+    if (!['ACTIVE', 'NEGOTIATION'].includes(offer.status)) {
+      sendJson(response, 409, { error: 'Esta oferta ya no permite editar el precio.' })
+      return
+    }
+
+    offer.price = price
+    await writeStore(store)
+    sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId }) })
     return
   }
 

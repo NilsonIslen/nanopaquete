@@ -11,6 +11,7 @@ import {
   startReleaseFee,
   startSellerPayment,
   takeOffer,
+  updateOfferPrice,
   verifyCustodianAuth,
   verifyCustodianRelease,
   verifyReleaseFee,
@@ -158,6 +159,8 @@ export function Nanopaquete() {
   const [custodianAuthIntent, setCustodianAuthIntent] = useState<CustodianAuthIntent | null>(null)
   const [custodianSession, setCustodianSession] = useState<CustodianSession | null>(getStoredCustodianSession)
   const [releaseFeeIntent, setReleaseFeeIntent] = useState<ReleaseFeeIntent | null>(null)
+  const [editingPriceOfferId, setEditingPriceOfferId] = useState<string | null>(null)
+  const [editingPrice, setEditingPrice] = useState('')
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [activeView, setActiveView] = useState<AppView>('offers')
@@ -345,6 +348,32 @@ export function Nanopaquete() {
       await loadOffers()
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'No se pudo tomar la oferta.')
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  const handleStartEditPrice = (offer: PublicOffer) => {
+    setEditingPriceOfferId(offer.id)
+    setEditingPrice(offer.price)
+  }
+
+  const handleUpdateOfferPrice = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!editingPriceOfferId) return
+    setError(null)
+    setLoading(`price-update:${editingPriceOfferId}`)
+
+    try {
+      const response = await updateOfferPrice(editingPriceOfferId, { price: editingPrice, clientSessionId })
+      setOffers((currentOffers) => currentOffers.map((offer) => (offer.id === response.offer.id ? response.offer : offer)))
+      if (takenOffer?.offer.id === response.offer.id) {
+        setTakenOffer({ ...takenOffer, offer: response.offer })
+      }
+      setEditingPriceOfferId(null)
+      setEditingPrice('')
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'No se pudo actualizar el precio.')
     } finally {
       setLoading(null)
     }
@@ -790,6 +819,32 @@ export function Nanopaquete() {
                     <small>Estado: {offer.status === 'ACTIVE' ? 'Activa' : offer.status === 'NEGOTIATION' ? 'En negociacion' : 'Liberando'}</small>
                     <small>Publicada {shortDate(offer.createdAt)}</small>
                   </div>
+                  {offer.canEditPrice && editingPriceOfferId !== offer.id && (
+                    <button type="button" onClick={() => handleStartEditPrice(offer)}>
+                      Editar precio
+                    </button>
+                  )}
+                  {offer.canEditPrice && editingPriceOfferId === offer.id && (
+                    <form className="inline-price-form" onSubmit={handleUpdateOfferPrice}>
+                      <label>
+                        Nuevo precio
+                        <input
+                          value={editingPrice}
+                          onChange={(event) => setEditingPrice(event.target.value)}
+                          required
+                          autoFocus
+                        />
+                      </label>
+                      <div className="button-row">
+                        <button className="primary-button" type="submit" disabled={loading === `price-update:${offer.id}`}>
+                          Guardar
+                        </button>
+                        <button className="ghost-button" type="button" onClick={() => { setEditingPriceOfferId(null); setEditingPrice('') }}>
+                          Cancelar
+                        </button>
+                      </div>
+                    </form>
+                  )}
                   {offer.canConfirmPayment && (
                     <button
                       type="button"
