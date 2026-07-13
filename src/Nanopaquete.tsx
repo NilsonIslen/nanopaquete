@@ -1107,16 +1107,17 @@ export function Nanopaquete() {
 
           {takenOffer && (
             <div className="private-box buyer-result">
-              <p className="eyebrow">{takenOffer.offer.status === 'RELEASING' ? 'Pago confirmado' : 'Negociacion iniciada'}</p>
+              <p className="eyebrow">{takenOffer.offer.status === 'RELEASING' ? 'Pago confirmado' : 'Negociación iniciada'}</p>
               {takenOffer.offer.status === 'RELEASING' ? (
                 <>
-                  <h3>El vendedor ya confirmo que recibio el pago.</h3>
-                  <p>La liberacion de los XNO esta pendiente del custodio. Si se tarda, comunicate con el custodio para consultar el estado.</p>
+                  <h3>El vendedor ya confirmó que recibió el pago.</h3>
+                  <p>La liberación de los XNO está pendiente del custodio. Si se tarda, comunícate con el custodio para consultar el estado.</p>
                 </>
               ) : (
                 <>
-                  <h3>Comunicate con el vendedor para acordar como haras el pago.</h3>
-                  <p>Los XNO de esta oferta ya estan bloqueados en custodia. El vendedor solo puede liberar a la cuenta que registraste cuando reciba el pago.</p>
+                  <h3>Comunícate con el vendedor para acordar cómo harás el pago.</h3>
+                  <p>Los XNO de esta oferta ya están bloqueados en custodia. El vendedor solo puede liberar a la cuenta que registraste cuando reciba el pago.</p>
+                  <p>Usa el contacto del custodio solo si ocurre un contratiempo que no puedas solucionar directamente con el vendedor.</p>
                 </>
               )}
               <dl>
@@ -1124,12 +1125,8 @@ export function Nanopaquete() {
                 <dd>{takenOffer.sellerCountry || 'No informado'}</dd>
                 <dt>Contacto vendedor</dt>
                 <dd>{takenOffer.sellerDialCode ? takenOffer.sellerDialCode + ' ' : ''}{takenOffer.sellerContact}</dd>
-                {takenOffer.offer.status === 'RELEASING' && (
-                  <>
-                    <dt>Contacto custodio</dt>
-                    <dd>{takenOffer.custodianContact}</dd>
-                  </>
-                )}
+                <dt>Contacto custodio</dt>
+                <dd>{takenOffer.custodianContact}</dd>
                 <dt>Oferta tomada</dt>
                 <dd>{takenOffer.offer.amountXno} XNO por {takenOffer.offer.price} {takenOffer.offer.currency}</dd>
               </dl>
