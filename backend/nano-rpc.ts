@@ -1,3 +1,5 @@
+import * as nanocurrency from 'nanocurrency'
+
 const RAW_PER_NANO = 10n ** 30n
 const RPC_TIMEOUT_MS = Number(process.env.NANO_RPC_TIMEOUT_MS ?? 8000)
 const DEFAULT_NANO_RPC_URL = 'http://127.0.0.1:7076'
@@ -377,13 +379,13 @@ export async function findIncomingPaymentByAmount({
 }
 
 export async function createNanoAccount(): Promise<GeneratedNanoAccount> {
-  const data = await nanoRpc({ action: 'key_create' })
-  const account = String(data.account ?? '')
-  const publicKey = String(data.public ?? '')
-  const privateKey = String(data.private ?? '')
+  const seed = await nanocurrency.generateSeed()
+  const privateKey = nanocurrency.deriveSecretKey(seed, 0)
+  const publicKey = nanocurrency.derivePublicKey(privateKey)
+  const account = nanocurrency.deriveAddress(publicKey, { useNanoPrefix: true })
 
   if (!isNanoAddress(account) || !/^[A-Fa-f0-9]{64}$/.test(publicKey) || !/^[A-Fa-f0-9]{64}$/.test(privateKey)) {
-    throw new Error('El nodo Nano no genero una cuenta valida.')
+    throw new Error('No se pudo generar una cuenta Nano valida.')
   }
 
   return {
