@@ -40,6 +40,7 @@ const currencies = [
 
 type Currency = (typeof currencies)[number]
 type OfferStatus = 'ACTIVE' | 'NEGOTIATION' | 'RELEASING' | 'RELEASED' | 'CANCELLED' | 'DISPUTED'
+type OfferType = 'SELL' | 'BUY'
 
 type SellerPaymentIntent = {
   id: string
@@ -71,15 +72,16 @@ type EscrowRecord = {
 
 type OfferRecord = {
   id: string
-  escrowId: string
+  offerType?: OfferType
+  escrowId?: string
   amountXno: string
   currency: Currency
   price: string
-  sellerContact: string
+  sellerContact?: string
   custodianId: string
   sellerCountry?: string
   sellerDialCode?: string
-  sellerPrivateCode: string
+  sellerPrivateCode?: string
   sellerWallet?: string
   paymentHash?: string
   buyerNanoAddress?: string
@@ -496,17 +498,19 @@ const releaseTakenOffer = (offer: OfferRecord) => {
 
 
 const publicOffer = (offer: OfferRecord, context: { clientSessionId?: string; custodianSession?: CustodianSession } = {}) => {
+  const offerType = offer.offerType ?? 'SELL'
   const isSeller = Boolean(context.clientSessionId && offer.sellerSessionId && offer.sellerSessionId === context.clientSessionId)
   const isCustodian = Boolean(context.custodianSession && context.custodianSession.custodianId === offer.custodianId)
 
   return {
     id: offer.id,
+    offerType,
     amountXno: offer.amountXno,
     currency: offer.currency,
     price: offer.price,
     status: offer.status,
     createdAt: offer.createdAt,
-    isOwnOffer: isSeller,
+    isOwnOffer: isSeller || Boolean(offerType === 'BUY' && context.clientSessionId && offer.buyerSessionId === context.clientSessionId),
     canEditPrice: isSeller && offer.status === 'ACTIVE',
     canConfirmPayment: isSeller && offer.status === 'NEGOTIATION',
     canCustodianReleaseOffer: isCustodian && canCustodianReleaseTakenOffer(offer),
@@ -537,7 +541,7 @@ const publicOffer = (offer: OfferRecord, context: { clientSessionId?: string; cu
 
 const takenOfferResponse = (store: Store, offer: OfferRecord) => ({
   offer: publicOffer(offer),
-  sellerContact: offer.sellerContact,
+  sellerContact: offer.sellerContact ?? '',
   sellerCountry: offer.sellerCountry,
   sellerDialCode: offer.sellerDialCode,
   custodianContact: getCustodianById(store, offer.custodianId).contact,
@@ -1343,6 +1347,68 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       const custodian = getCustodianById(store, offer.custodianId)
       sendJson(response, 201, { offer: publicOffer(offer), sellerPrivateCode: offer.sellerPrivateCode, custodianContact: custodian.contact, custodyFeeXno })
     }
+    return
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/buy-offers') {
+    const body = await readJsonBody(request)
+    const amountXno = normalizeText(body.amountXno).replace(',', '.')
+    const currency = normalizeText(body.currency).toUpperCase()
+    const price = normalizeText(body.price)
+    const buyerNanoAddress = normalizeText(body.buyerNanoAddress)
+    const buyerCountry = normalizeText(body.buyerCountry)
+    const buyerDialCode = normalizeText(body.buyerDialCode)
+    const buyerContact = normalizeText(body.buyerContact)
+    const clientSessionId = normalizeClientSessionId(body.clientSessionId)
+
+    try {
+      if (BigInt(nanoToRaw(amountXno)) <= 0n) throw new Error('Monto invalido')
+    } catch {
+      sendJson(response, 400, { error: 'Ingresa la cantidad de XNO que quieres comprar.' })
+      return
+    }
+
+    if (!isCurrency(currency)) {
+      sendJson(response, 400, { error: 'Selecciona un activo valido.' })
+      return
+    }
+
+    if (!price) {
+      sendJson(response, 400, { error: 'Ingresa la cantidad del activo que entregas.' })
+      return
+    }
+
+    if (!isNanoAddress(buyerNanoAddress)) {
+      sendJson(response, 400, { error: 'Ingresa una cuenta Nano valida para recibir los XNO.' })
+      return
+    }
+
+    if (!buyerCountry || !buyerDialCode || buyerContact.length < 6) {
+      sendJson(response, 400, { error: 'Ingresa pais, extension y contacto valido.' })
+      return
+    }
+
+    const store = await readStore()
+    const custodian = getActiveCustodian(store)
+    const offer: OfferRecord = {
+      id: `of_${randomUUID().replaceAll('-', '').slice(0, 18)}`,
+      offerType: 'BUY',
+      amountXno,
+      currency,
+      price,
+      buyerNanoAddress,
+      buyerCountry,
+      buyerDialCode,
+      buyerContact,
+      buyerSessionId: clientSessionId || undefined,
+      custodianId: custodian.id,
+      status: 'ACTIVE',
+      createdAt: new Date().toISOString(),
+    }
+
+    store.offers.unshift(offer)
+    await writeStore(store)
+    sendJson(response, 201, { offer: publicOffer(offer, { clientSessionId }), sellerPrivateCode: '', custodianContact: custodian.contact, custodyFeeXno })
     return
   }
 

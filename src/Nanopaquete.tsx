@@ -9,6 +9,7 @@ import {
   getBuyerNegotiation,
   getCustodians,
   getOffers,
+  publishBuyOffer,
   publishOffer,
   releaseExpiredTakenOffer,
   startCustodianAuth,
@@ -152,6 +153,16 @@ const initialBuyerForm = {
   contact: '',
 }
 
+const initialBuyOfferForm = {
+  amountXno: '',
+  currency: 'COP' as Currency,
+  price: '',
+  nanoAddress: '',
+  country: 'Colombia',
+  dialCode: '+57',
+  contact: '',
+}
+
 const initialCustodianForm = {
   name: '',
   wallet: '',
@@ -284,6 +295,8 @@ const groupOffers = (offers: PublicOffer[]): OfferGroup[] => {
 
 export function Nanopaquete() {
   const [sellerForm, setSellerForm] = useState(getStoredSellerOfferDraft)
+  const [buyOfferForm, setBuyOfferForm] = useState(initialBuyOfferForm)
+  const [createOfferType, setCreateOfferType] = useState<'SELL' | 'BUY'>('SELL')
   const [sellerPayment, setSellerPayment] = useState<SellerPaymentIntent | null>(getStoredSellerPayment)
   const [escrowSession, setEscrowSession] = useState<EscrowSession | null>(null)
   const [offers, setOffers] = useState<PublicOffer[]>([])
@@ -450,6 +463,10 @@ export function Nanopaquete() {
     setBuyerForm((current) => ({ ...current, [field]: value }))
   }
 
+  const updateBuyOfferForm = (field: keyof typeof buyOfferForm, value: string) => {
+    setBuyOfferForm((current) => ({ ...current, [field]: value }))
+  }
+
   const updateCustodianForm = (field: keyof typeof custodianForm, value: string | boolean) => {
     setCustodianForm((current) => ({ ...current, [field]: value }))
   }
@@ -524,6 +541,32 @@ export function Nanopaquete() {
       setActiveView('create-offer')
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'No se pudo iniciar el deposito.')
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  const handlePublishBuyOffer = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    setError(null)
+    setLoading('publish-buy')
+
+    try {
+      await publishBuyOffer({
+        amountXno: buyOfferForm.amountXno,
+        currency: buyOfferForm.currency,
+        price: buyOfferForm.price,
+        buyerNanoAddress: buyOfferForm.nanoAddress,
+        buyerCountry: buyOfferForm.country,
+        buyerDialCode: buyOfferForm.dialCode,
+        buyerContact: buyOfferForm.contact,
+        clientSessionId,
+      })
+      setBuyOfferForm(initialBuyOfferForm)
+      setActiveView('offers')
+      await loadOffers()
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'No se pudo publicar la oferta de compra.')
     } finally {
       setLoading(null)
     }
@@ -1008,7 +1051,7 @@ export function Nanopaquete() {
           <div className="panel guide-panel">
             <h2>Guía</h2>
             <h3>Condiciones generales</h3>
-            <p>Nanopaquete organiza negociaciones P2P de XNO con custodia automatizada en el backend. Todas las ofertas aparecen en una misma página y se diferencian por tipo: compra de Nano y venta de Nano.</p>
+            <p>Nanopaquete organiza negociaciones P2P de XNO con custodia automática. Todas las ofertas aparecen en una misma página y se diferencian por tipo: compra de Nano y venta de Nano.</p>
             <p>La plataforma no persigue el precio del mercado. Cada usuario define cuántos XNO compra o vende, qué activo entrega o recibe a cambio y cuál es la cantidad de ese activo. Esa libertad crea un mercado interno donde la competencia entre ofertas regula la inflación o depreciación dentro de Nanopaquete.</p>
             <p>Cuando una oferta entra en negociación, Nanopaquete crea una cuenta Nano temporal para custodiar los fondos de esa operación. Esa cuenta se guarda de forma segura en el servidor y no se muestra a los usuarios.</p>
             <h3>Publicar venta de Nano</h3>
@@ -1024,7 +1067,7 @@ export function Nanopaquete() {
             <p>El vendedor deposita la cantidad de XNO de la oferta más el 0,2% de comisión de plataforma. Cuando el depósito queda confirmado, Nanopaquete notifica al comprador y muestra los números de contacto para que ambas partes acuerden el pago.</p>
             <p>Cuando el comprador paga, el vendedor confirma la recepción del pago y Nanopaquete libera los XNO a la cuenta Nano registrada por el comprador. La comisión queda disponible para retiro desde la página privada de Custodio.</p>
             <h3>Custodio</h3>
-            <p>El custodio es la aplicación en el backend. Su función es crear y proteger las cuentas temporales de custodia, detectar depósitos, liberar fondos cuando corresponde y conservar la comisión de plataforma.</p>
+            <p>El custodio es Nanopaquete. Su función es crear y proteger las cuentas temporales de custodia, detectar depósitos, liberar fondos cuando corresponde y conservar la comisión de plataforma.</p>
             <p>La página privada de Custodio permite revisar negociaciones, ver los contactos de las dos partes en caso de disputa y retirar la comisión disponible por cada operación completada.</p>
             <h3>Posibles disputas</h3>
             <div className="guide-disputes">
@@ -1049,19 +1092,26 @@ export function Nanopaquete() {
           </div>
 
           {!sellerPayment && !escrowSession && (
+            <div className="offer-type-tabs" role="tablist" aria-label="Tipo de oferta">
+              <button
+                className={createOfferType === 'SELL' ? 'selected' : ''}
+                type="button"
+                onClick={() => setCreateOfferType('SELL')}
+              >
+                Venta Nano
+              </button>
+              <button
+                className={createOfferType === 'BUY' ? 'selected' : ''}
+                type="button"
+                onClick={() => setCreateOfferType('BUY')}
+              >
+                Compra Nano
+              </button>
+            </div>
+          )}
+
+          {!sellerPayment && !escrowSession && createOfferType === 'SELL' && (
             <form className="stack-form publish-form deposit-start" onSubmit={handleStartSellerPayment}>
-              <label>
-                Custodio
-                <select
-                  value={selectedCustodianId}
-                  onChange={(event) => setSelectedCustodianId(event.target.value)}
-                  disabled={!custodians.length}
-                >
-                  {custodians.map((custodian) => (
-                    <option key={custodian.id} value={custodian.id}>{custodian.name}</option>
-                  ))}
-                </select>
-              </label>
               <label>
                 Cantidad de Nano a vender
                 <input
@@ -1116,9 +1166,81 @@ export function Nanopaquete() {
                   required
                 />
               </label>
-              <button className="primary-button create-offer-button" type="submit" disabled={loading === 'start-payment' || !selectedCustodianId}>
+              <button className="primary-button create-offer-button" type="submit" disabled={loading === 'start-payment'}>
                 <Wallet size={18} />
-                Guardar y pagar
+                Publicar venta
+              </button>
+            </form>
+          )}
+
+          {!sellerPayment && !escrowSession && createOfferType === 'BUY' && (
+            <form className="stack-form publish-form deposit-start" onSubmit={handlePublishBuyOffer}>
+              <label>
+                Cantidad de Nano a comprar
+                <input
+                  inputMode="decimal"
+                  placeholder="Ej. 10"
+                  value={buyOfferForm.amountXno}
+                  onChange={(event) => updateBuyOfferForm('amountXno', event.target.value)}
+                  required
+                />
+              </label>
+              <label>
+                Activo que entregas
+                <select
+                  value={buyOfferForm.currency}
+                  onChange={(event) => updateBuyOfferForm('currency', event.target.value as Currency)}
+                >
+                  {currencies.map((currency) => (
+                    <option key={currency} value={currency}>{getCurrencyLabel(currency)}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Cantidad del activo
+                <input
+                  placeholder="Ej. 180000"
+                  value={buyOfferForm.price}
+                  onChange={(event) => updateBuyOfferForm('price', event.target.value)}
+                  required
+                />
+              </label>
+              <label>
+                Cuenta Nano donde recibirás los XNO
+                <input
+                  placeholder="nano_..."
+                  value={buyOfferForm.nanoAddress}
+                  onChange={(event) => updateBuyOfferForm('nanoAddress', event.target.value)}
+                  required
+                />
+              </label>
+              <label>
+                País del contacto
+                <select
+                  value={buyOfferForm.country}
+                  onChange={(event) => {
+                    const selected = contactCountries.find((item) => item.country === event.target.value)
+                    updateBuyOfferForm('country', event.target.value)
+                    updateBuyOfferForm('dialCode', selected?.dialCode ?? '')
+                  }}
+                >
+                  {contactCountries.map((item) => (
+                    <option key={item.country} value={item.country}>{item.country}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Contacto
+                <input
+                  placeholder="Ej. 3120000000"
+                  value={buyOfferForm.contact}
+                  onChange={(event) => updateBuyOfferForm('contact', event.target.value)}
+                  required
+                />
+              </label>
+              <button className="primary-button create-offer-button" type="submit" disabled={loading === 'publish-buy'}>
+                <Wallet size={18} />
+                Publicar compra
               </button>
             </form>
           )}
@@ -1140,8 +1262,6 @@ export function Nanopaquete() {
                 <QRCodeSVG value={sellerPayment.paymentUri} size={176} marginSize={2} />
               </div>
               <dl>
-                <dt>Custodio seleccionado</dt>
-                <dd>{sellerPayment.custodianName}</dd>
                 <dt>Wallet custodia</dt>
                 <dd>{sellerPayment.receiverAddress}</dd>
                 <dt>Monto a depositar</dt>
@@ -1156,7 +1276,7 @@ export function Nanopaquete() {
               </button>
               <button className="ghost-button danger-button" type="button" onClick={handleCancelSellerPayment}>
                 <X size={16} />
-                Cancelar y elegir otro custodio
+                Cancelar
               </button>
             </div>
           )}
@@ -1212,8 +1332,9 @@ export function Nanopaquete() {
                   const isSelected = selectedOffer?.id === offer.id
 
                   return (
-                    <article className={isSelected ? 'offer-card selected-offer-card' : 'offer-card'} key={offer.id}>
+                    <article className={`${isSelected ? 'offer-card selected-offer-card' : 'offer-card'} ${offer.offerType === 'BUY' ? 'buy-offer-card' : 'sell-offer-card'}`} key={offer.id}>
                   <div>
+                    <span className="offer-kind-pill">{offer.offerType === 'BUY' ? 'Compra Nano' : 'Venta Nano'}</span>
                     <p className="offer-amount">{offer.amountXno} XNO</p>
                     <p>{offer.price} {offer.currency}</p>
                     <small>Estado: {offer.status === 'ACTIVE' ? 'Activa' : offer.status === 'NEGOTIATION' ? 'En negociacion' : 'Liberando'}</small>
@@ -1354,7 +1475,7 @@ export function Nanopaquete() {
                       </div>
                     </div>
                   )}
-                  {!isSelected && offer.status === 'ACTIVE' && !offer.isOwnOffer && (
+                  {!isSelected && offer.status === 'ACTIVE' && !offer.isOwnOffer && offer.offerType === 'SELL' && (
                     <button
                       type="button"
                       onClick={() => {
@@ -1367,6 +1488,9 @@ export function Nanopaquete() {
                     >
                       Tomar oferta
                     </button>
+                  )}
+                  {offer.status === 'ACTIVE' && !offer.isOwnOffer && offer.offerType === 'BUY' && (
+                    <span className="offer-status-pill">Compra publicada</span>
                   )}
                   {isSelected && (
                     <form className="take-form inline-take-form" onSubmit={handleTakeOffer}>

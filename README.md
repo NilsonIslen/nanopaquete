@@ -1,6 +1,6 @@
 # Nanopaquete
 
-App experimental para comprar y vender XNO con custodia automatizada en el backend.
+App experimental para comprar y vender XNO con custodia automatica.
 
 ## Flujo actual
 
@@ -33,7 +33,7 @@ La plataforma no persigue el precio del mercado. Cada usuario define cuanta cant
 
 ## Custodio
 
-La custodia de XNO la administra Nanopaquete desde el backend. La pagina privada de Custodio permite revisar negociaciones, ver los contactos de las dos partes en caso de disputa y retirar la comision disponible por cada operacion completada.
+La custodia de XNO la administra Nanopaquete. La pagina privada de Custodio permite revisar negociaciones, ver los contactos de las dos partes en caso de disputa y retirar la comision disponible por cada operacion completada.
 
 La pagina de Custodio es una direccion privada para la persona autorizada. La navegacion publica muestra las ofertas, la creacion de ofertas, la descarga de wallet y la guia.
 

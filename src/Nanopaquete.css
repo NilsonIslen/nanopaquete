@@ -165,6 +165,24 @@ button:disabled {
   gap: 14px;
 }
 
+.offer-type-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.offer-type-tabs button {
+  background: #edf4fa;
+  color: #183247;
+  border: 1px solid #c9d7e5;
+}
+
+.offer-type-tabs button.selected {
+  background: #1f5f8f;
+  color: #ffffff;
+  border-color: #1f5f8f;
+}
+
 label {
   display: grid;
   gap: 7px;
@@ -303,6 +321,31 @@ dd {
   border-radius: 8px;
   padding: 16px;
   background: #fbfdff;
+}
+
+.sell-offer-card {
+  border-left: 5px solid #b23b32;
+}
+
+.buy-offer-card {
+  border-left: 5px solid #2e7d4f;
+}
+
+.offer-kind-pill {
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  border-radius: 999px;
+  padding: 0 10px;
+  font-size: 0.78rem;
+  font-weight: 900;
+  color: #ffffff;
+  background: #b23b32;
+}
+
+.buy-offer-card .offer-kind-pill {
+  background: #2e7d4f;
 }
 
 .offer-amount {

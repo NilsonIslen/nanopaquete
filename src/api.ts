@@ -34,6 +34,7 @@ export type Currency =
   | 'UYU'
   | 'VES'
 export type OfferStatus = 'ACTIVE' | 'NEGOTIATION' | 'RELEASING' | 'RELEASED' | 'CANCELLED' | 'DISPUTED'
+export type OfferType = 'SELL' | 'BUY'
 
 export type CustodianOption = {
   id: string
@@ -52,6 +53,7 @@ export type ManagedCustodian = CustodianOption & {
 
 export type PublicOffer = {
   id: string
+  offerType: OfferType
   amountXno: string
   currency: Currency
   price: string
@@ -102,6 +104,17 @@ export type PublishOfferPayload = {
   sellerCountry: string
   sellerDialCode: string
   sellerContact: string
+}
+
+export type PublishBuyOfferPayload = {
+  amountXno: string
+  currency: Currency
+  price: string
+  buyerNanoAddress: string
+  buyerCountry: string
+  buyerDialCode: string
+  buyerContact: string
+  clientSessionId: string
 }
 
 export type PublishedOffer = {
@@ -209,6 +222,12 @@ export const verifySellerPayment = (intentId: string, clientSessionId: string) =
 
 export const publishOffer = (payload: PublishOfferPayload) =>
   requestJson<PublishedOffer>('/offers', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+
+export const publishBuyOffer = (payload: PublishBuyOfferPayload) =>
+  requestJson<PublishedOffer>('/buy-offers', {
     method: 'POST',
     body: JSON.stringify(payload),
   })
