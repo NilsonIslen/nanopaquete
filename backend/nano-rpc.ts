@@ -13,6 +13,17 @@ type IncomingPayment = {
   amountNano: string
 }
 
+type GeneratedNanoAccount = {
+  account: string
+  publicKey: string
+  privateKey: string
+}
+
+type NanoSendResult = {
+  blockHash: string
+  receivedBlocks: string[]
+}
+
 type HistoryEntry = Record<string, string | undefined>
 type ReceivableEntry = { amount?: string; source?: string }
 
@@ -363,6 +374,105 @@ export async function findIncomingPaymentByAmount({
         !excluded.has(normalizeNanoHash(entry.hash ?? '')),
     )
   }
+}
+
+export async function createNanoAccount(): Promise<GeneratedNanoAccount> {
+  const data = await nanoRpc({ action: 'key_create' })
+  const account = String(data.account ?? '')
+  const publicKey = String(data.public ?? '')
+  const privateKey = String(data.private ?? '')
+
+  if (!isNanoAddress(account) || !/^[A-Fa-f0-9]{64}$/.test(publicKey) || !/^[A-Fa-f0-9]{64}$/.test(privateKey)) {
+    throw new Error('El nodo Nano no genero una cuenta valida.')
+  }
+
+  return {
+    account,
+    publicKey: publicKey.toUpperCase(),
+    privateKey: privateKey.toUpperCase(),
+  }
+}
+
+export async function sendFromPrivateKey({
+  walletId,
+  privateKey,
+  sourceAccount,
+  destinationAccount,
+  amountNano,
+}: {
+  walletId: string
+  privateKey: string
+  sourceAccount: string
+  destinationAccount: string
+  amountNano: string
+}): Promise<NanoSendResult> {
+  if (!walletId.trim()) throw new Error('Configura NANO_WALLET_ID para poder retirar fondos desde cuentas generadas.')
+  if (!isNanoAddress(sourceAccount)) throw new Error('La cuenta Nano de origen no es valida.')
+  if (!isNanoAddress(destinationAccount)) throw new Error('La cuenta Nano destino no es valida.')
+
+  await importPrivateKey(walletId, privateKey, sourceAccount)
+  const receivedBlocks = await receivePendingBlocks(walletId, sourceAccount)
+  const sent = await nanoRpc({
+    action: 'send',
+    wallet: walletId,
+    source: sourceAccount,
+    destination: destinationAccount,
+    amount: nanoToRaw(amountNano),
+  })
+  const blockHash = String(sent.block ?? '').toUpperCase()
+
+  if (!isNanoHash(blockHash)) {
+    throw new Error('El nodo Nano no devolvio un hash valido para el retiro.')
+  }
+
+  return { blockHash, receivedBlocks }
+}
+
+async function importPrivateKey(walletId: string, privateKey: string, expectedAccount: string) {
+  let data: Record<string, unknown>
+
+  try {
+    data = await nanoRpc({
+      action: 'wallet_add',
+      wallet: walletId,
+      key: privateKey,
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message.toLowerCase() : ''
+    if (message.includes('already') || message.includes('exists')) return
+    throw error
+  }
+
+  const account = String(data.account ?? '')
+
+  if (account && account !== expectedAccount) {
+    throw new Error('La clave privada no corresponde a la cuenta Nano seleccionada.')
+  }
+}
+
+async function receivePendingBlocks(walletId: string, account: string) {
+  const data = await nanoRpc({
+    action: 'receivable',
+    account,
+    count: '100',
+    source: 'true',
+    include_only_confirmed: 'true',
+  })
+  const receivedBlocks: string[] = []
+
+  for (const [hash] of getReceivableEntries(data)) {
+    if (!isNanoHash(hash)) continue
+    const received = await nanoRpc({
+      action: 'receive',
+      wallet: walletId,
+      account,
+      block: normalizeNanoHash(hash),
+    })
+    const receivedHash = String(received.block ?? '').toUpperCase()
+    if (isNanoHash(receivedHash)) receivedBlocks.push(receivedHash)
+  }
+
+  return receivedBlocks
 }
 
 async function getNanoBlockInfo(hash: string) {

@@ -1,10 +1,10 @@
 import { createServer } from 'node:http'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { findAnyIncomingPayment, findIncomingPaymentByAmount, findIncomingPaymentBySenderAmount, isNanoAddress, nanoToRaw } from './nano-rpc'
+import { createNanoAccount, findAnyIncomingPayment, findIncomingPaymentByAmount, findIncomingPaymentBySenderAmount, isNanoAddress, nanoToRaw, sendFromPrivateKey } from './nano-rpc'
 
 const currencies = [
   'ARS',
@@ -138,6 +138,35 @@ type ReleaseFeeIntent = {
   paymentHash?: string
 }
 
+type NanoAccountStatus = 'AVAILABLE' | 'ASSIGNED' | 'LOCKED' | 'RETIRED'
+
+type NanoAccountRecord = {
+  id: string
+  account: string
+  publicKey: string
+  encryptedPrivateKey: string
+  keyFingerprint: string
+  status: NanoAccountStatus
+  purpose: 'ESCROW' | 'COMMISSION' | 'RESERVE'
+  label?: string
+  linkedOfferId?: string
+  commissionAvailableXno: string
+  createdAt: string
+  updatedAt: string
+  lastUsedAt?: string
+  notes?: string
+  withdrawalHistory: NanoAccountWithdrawal[]
+}
+
+type NanoAccountWithdrawal = {
+  id: string
+  amountXno: string
+  destination: string
+  txHash?: string
+  createdAt: string
+  note?: string
+}
+
 type Store = {
   custodians: Custodian[]
   sellerPaymentIntents: SellerPaymentIntent[]
@@ -147,6 +176,7 @@ type Store = {
   escrows: EscrowRecord[]
   offers: OfferRecord[]
   usedPayments: UsedPayment[]
+  nanoAccounts: NanoAccountRecord[]
 }
 
 const port = Number(process.env.NANOPAQUETE_API_PORT ?? 8789)
@@ -241,6 +271,8 @@ const releaseFeeTtlMs = Number(process.env.NANOPAQUETE_RELEASE_FEE_TTL_MS ?? 60 
 const custodianAuthTtlMs = Number(process.env.NANOPAQUETE_CUSTODIAN_AUTH_TTL_MS ?? 15 * 60 * 1000)
 const custodianSessionTtlMs = Number(process.env.NANOPAQUETE_CUSTODIAN_SESSION_TTL_MS ?? 12 * 60 * 60 * 1000)
 const takenOfferCustodianReleaseMs = Number(process.env.NANOPAQUETE_TAKEN_OFFER_RELEASE_MS ?? 24 * 60 * 60 * 1000)
+const nanoAccountSecret = process.env.NANOPAQUETE_ACCOUNT_SECRET ?? adminPassword
+const nanoWalletId = process.env.NANO_WALLET_ID ?? ''
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const storePath = join(__dirname, 'data', 'nanopaquete.json')
 
@@ -315,6 +347,78 @@ const getClientIp = (request: IncomingMessage) => {
   return forwardedIp?.split(',')[0]?.trim() || request.socket.remoteAddress || 'unknown'
 }
 
+const getEncryptionKey = () => createHash('sha256').update(nanoAccountSecret).digest()
+
+const encryptSecret = (value: string) => {
+  const iv = randomBytes(12)
+  const cipher = createCipheriv('aes-256-gcm', getEncryptionKey(), iv)
+  const encrypted = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()])
+  const tag = cipher.getAuthTag()
+  return `${iv.toString('base64')}.${tag.toString('base64')}.${encrypted.toString('base64')}`
+}
+
+const decryptSecret = (value: string) => {
+  const [ivValue, tagValue, encryptedValue] = value.split('.')
+  if (!ivValue || !tagValue || !encryptedValue) throw new Error('Formato de clave cifrada invalido.')
+  const decipher = createDecipheriv('aes-256-gcm', getEncryptionKey(), Buffer.from(ivValue, 'base64'))
+  decipher.setAuthTag(Buffer.from(tagValue, 'base64'))
+  return Buffer.concat([
+    decipher.update(Buffer.from(encryptedValue, 'base64')),
+    decipher.final(),
+  ]).toString('utf8')
+}
+
+const getKeyFingerprint = (privateKey: string) =>
+  createHash('sha256').update(privateKey).digest('hex').slice(0, 16).toUpperCase()
+
+const nanoAccountStatuses: NanoAccountStatus[] = ['AVAILABLE', 'ASSIGNED', 'LOCKED', 'RETIRED']
+const nanoAccountPurposes: NanoAccountRecord['purpose'][] = ['ESCROW', 'COMMISSION', 'RESERVE']
+
+const normalizeNanoAccounts = (value: unknown): NanoAccountRecord[] => {
+  if (!Array.isArray(value)) return []
+
+  return value
+    .filter((account): account is Partial<NanoAccountRecord> => Boolean(account && typeof account === 'object'))
+    .filter((account) => Boolean(account.id && isNanoAddress(String(account.account ?? '')) && account.encryptedPrivateKey))
+    .map((account) => {
+      const status = nanoAccountStatuses.includes(account.status as NanoAccountStatus)
+        ? account.status as NanoAccountStatus
+        : 'AVAILABLE'
+      const purpose = nanoAccountPurposes.includes(account.purpose as NanoAccountRecord['purpose'])
+        ? account.purpose as NanoAccountRecord['purpose']
+        : 'ESCROW'
+
+      return {
+        id: normalizeClientSessionId(account.id),
+        account: normalizeText(account.account),
+        publicKey: normalizeText(account.publicKey).toUpperCase(),
+        encryptedPrivateKey: normalizeText(account.encryptedPrivateKey),
+        keyFingerprint: normalizeText(account.keyFingerprint),
+        status,
+        purpose,
+        label: normalizeText(account.label) || undefined,
+        linkedOfferId: normalizeText(account.linkedOfferId) || undefined,
+        commissionAvailableXno: normalizeText(account.commissionAvailableXno) || '0',
+        createdAt: normalizeText(account.createdAt) || new Date().toISOString(),
+        updatedAt: normalizeText(account.updatedAt) || new Date().toISOString(),
+        lastUsedAt: normalizeText(account.lastUsedAt) || undefined,
+        notes: normalizeText(account.notes) || undefined,
+        withdrawalHistory: Array.isArray(account.withdrawalHistory)
+          ? account.withdrawalHistory
+              .filter((withdrawal): withdrawal is NanoAccountWithdrawal => Boolean(withdrawal && typeof withdrawal === 'object'))
+              .map((withdrawal) => ({
+                id: normalizeClientSessionId(withdrawal.id) || `wdr_${randomUUID().replaceAll('-', '').slice(0, 18)}`,
+                amountXno: normalizeText(withdrawal.amountXno) || '0',
+                destination: normalizeText(withdrawal.destination),
+                txHash: normalizeText(withdrawal.txHash) || undefined,
+                createdAt: normalizeText(withdrawal.createdAt) || new Date().toISOString(),
+                note: normalizeText(withdrawal.note) || undefined,
+              }))
+          : [],
+      }
+    })
+}
+
 const readStore = async (): Promise<Store> => {
   try {
     const content = await readFile(storePath, 'utf8')
@@ -329,15 +433,16 @@ const readStore = async (): Promise<Store> => {
       escrows: Array.isArray(parsed.escrows) ? parsed.escrows : [],
       offers: Array.isArray(parsed.offers) ? parsed.offers : [],
       usedPayments: Array.isArray(parsed.usedPayments) ? parsed.usedPayments : [],
+      nanoAccounts: normalizeNanoAccounts(parsed.nanoAccounts),
     }
   } catch {
-    return { custodians: sanitizeCustodians(getConfiguredCustodians()), sellerPaymentIntents: [], custodianAuthIntents: [], custodianSessions: [], releaseFeeIntents: [], escrows: [], offers: [], usedPayments: [] }
+    return { custodians: sanitizeCustodians(getConfiguredCustodians()), sellerPaymentIntents: [], custodianAuthIntents: [], custodianSessions: [], releaseFeeIntents: [], escrows: [], offers: [], usedPayments: [], nanoAccounts: [] }
   }
 }
 
 const writeStore = async (store: Store) => {
   await mkdir(dirname(storePath), { recursive: true })
-  await writeFile(storePath, `${JSON.stringify({ ...store, custodians: sanitizeCustodians(store.custodians) }, null, 2)}\n`)
+  await writeFile(storePath, `${JSON.stringify({ ...store, custodians: sanitizeCustodians(store.custodians), nanoAccounts: normalizeNanoAccounts(store.nanoAccounts) }, null, 2)}\n`)
 }
 
 const normalizeText = (value: unknown) => String(value ?? '').trim()
@@ -540,6 +645,198 @@ const renderAdmin = (offers: OfferRecord[]) => `<!doctype html>
     </main>
   </body>
 </html>`
+
+const nanoAccountStatusLabel = (status: NanoAccountStatus) =>
+  ({
+    AVAILABLE: 'Disponible',
+    ASSIGNED: 'Asignada',
+    LOCKED: 'Bloqueada',
+    RETIRED: 'Retirada',
+  })[status]
+
+const nanoAccountPurposeLabel = (purpose: NanoAccountRecord['purpose']) =>
+  ({
+    ESCROW: 'Custodia temporal',
+    COMMISSION: 'Comision',
+    RESERVE: 'Reserva',
+  })[purpose]
+
+const renderNanoAccountsAdmin = (accounts: NanoAccountRecord[], destinationWallet: string, message = '') => `<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Cuentas Nano - Nanopaquete</title>
+    <style>
+      body { margin: 0; font-family: Inter, system-ui, sans-serif; background: #f5f7f4; color: #172019; }
+      header { padding: 24px 32px; background: #18241c; color: white; }
+      nav { display: flex; gap: 12px; margin-top: 12px; }
+      nav a { color: white; }
+      main { padding: 24px 32px; display: grid; gap: 18px; }
+      section, article { background: white; border: 1px solid #d8ded6; border-radius: 8px; padding: 18px; }
+      dl { display: grid; grid-template-columns: 190px 1fr; gap: 8px 16px; margin: 0 0 16px; }
+      dt { color: #657064; }
+      dd { margin: 0; overflow-wrap: anywhere; }
+      form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; }
+      label { display: grid; gap: 4px; font-size: 13px; color: #4f5c52; }
+      select, input, button, textarea { min-height: 38px; border-radius: 6px; border: 1px solid #bfc9bd; padding: 0 10px; font: inherit; }
+      textarea { padding: 10px; min-width: min(520px, 100%); min-height: 64px; }
+      button { background: #206b3a; color: white; border-color: #206b3a; cursor: pointer; }
+      .danger { background: #8f2d1f; border-color: #8f2d1f; }
+      .status { display: inline-flex; padding: 4px 8px; border-radius: 999px; background: #e7efe5; font-weight: 700; }
+      .message { border-color: #9bc6a4; background: #eef8ef; }
+      .muted { color: #657064; }
+      .withdrawals { margin-top: 12px; padding-top: 12px; border-top: 1px solid #e5e9e3; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Cuentas Nano</h1>
+      <p>Generacion y administracion de cuentas de custodia para Nanopaquete.</p>
+      <nav>
+        <a href="/admin/offers">Ofertas</a>
+        <a href="/admin/nano-accounts">Cuentas Nano</a>
+      </nav>
+    </header>
+    <main>
+      ${message ? `<section class="message">${escapeHtml(message)}</section>` : ''}
+      <section>
+        <h2>Generar cuenta</h2>
+        <p class="muted">La clave privada se cifra antes de guardarse. Define <code>NANOPAQUETE_ACCOUNT_SECRET</code> en produccion para no depender de la clave admin.</p>
+        <form method="post" action="/admin/nano-accounts/generate">
+          <label>
+            Etiqueta
+            <input name="label" placeholder="Ej. custodia inicial" />
+          </label>
+          <label>
+            Uso
+            <select name="purpose">
+              ${nanoAccountPurposes.map((purpose) => `<option value="${purpose}">${nanoAccountPurposeLabel(purpose)}</option>`).join('')}
+            </select>
+          </label>
+          <label>
+            Nota
+            <input name="notes" placeholder="Nota interna opcional" />
+          </label>
+          <button>Generar cuenta Nano</button>
+        </form>
+      </section>
+      ${accounts
+        .map(
+          (account) => `<article>
+            <h2>${escapeHtml(account.label || account.id)}</h2>
+            <dl>
+              <dt>Estado</dt><dd><span class="status">${nanoAccountStatusLabel(account.status)}</span></dd>
+              <dt>Uso</dt><dd>${nanoAccountPurposeLabel(account.purpose)}</dd>
+              <dt>Cuenta Nano</dt><dd>${escapeHtml(account.account)}</dd>
+              <dt>Clave publica</dt><dd>${escapeHtml(account.publicKey)}</dd>
+              <dt>Huella de clave</dt><dd>${escapeHtml(account.keyFingerprint)}</dd>
+              <dt>Oferta vinculada</dt><dd>${escapeHtml(account.linkedOfferId)}</dd>
+              <dt>Comision disponible</dt><dd>${escapeHtml(account.commissionAvailableXno)} XNO</dd>
+              <dt>Creada</dt><dd>${escapeHtml(account.createdAt)}</dd>
+              <dt>Actualizada</dt><dd>${escapeHtml(account.updatedAt)}</dd>
+              <dt>Ultimo uso</dt><dd>${escapeHtml(account.lastUsedAt)}</dd>
+              <dt>Notas</dt><dd>${escapeHtml(account.notes)}</dd>
+            </dl>
+            <form method="post" action="/admin/nano-accounts/${encodeURIComponent(account.id)}/update">
+              <label>
+                Estado
+                <select name="status">
+                  ${nanoAccountStatuses
+                    .map((status) => `<option value="${status}" ${status === account.status ? 'selected' : ''}>${nanoAccountStatusLabel(status)}</option>`)
+                    .join('')}
+                </select>
+              </label>
+              <label>
+                Uso
+                <select name="purpose">
+                  ${nanoAccountPurposes
+                    .map((purpose) => `<option value="${purpose}" ${purpose === account.purpose ? 'selected' : ''}>${nanoAccountPurposeLabel(purpose)}</option>`)
+                    .join('')}
+                </select>
+              </label>
+              <label>
+                Etiqueta
+                <input name="label" value="${escapeHtml(account.label)}" />
+              </label>
+              <label>
+                Oferta vinculada
+                <input name="linkedOfferId" value="${escapeHtml(account.linkedOfferId)}" />
+              </label>
+              <label>
+                Comision disponible XNO
+                <input name="commissionAvailableXno" value="${escapeHtml(account.commissionAvailableXno)}" />
+              </label>
+              <label>
+                Nota
+                <textarea name="notes">${escapeHtml(account.notes)}</textarea>
+              </label>
+              <button>Guardar cambios</button>
+            </form>
+            <form method="post" action="/admin/nano-accounts/${encodeURIComponent(account.id)}/withdraw">
+              <label>
+                Destino fijo
+                <input value="${escapeHtml(destinationWallet)}" readonly />
+              </label>
+              <label>
+                Monto
+                <input value="${escapeHtml(account.commissionAvailableXno)} XNO" readonly />
+              </label>
+              <button class="danger">Retirar fondos</button>
+            </form>
+            <div class="withdrawals">
+              <strong>Retiros</strong>
+              ${
+                account.withdrawalHistory.length
+                  ? account.withdrawalHistory
+                      .map(
+                        (withdrawal) => `<dl>
+                          <dt>Fecha</dt><dd>${escapeHtml(withdrawal.createdAt)}</dd>
+                          <dt>Monto</dt><dd>${escapeHtml(withdrawal.amountXno)} XNO</dd>
+                          <dt>Destino</dt><dd>${escapeHtml(withdrawal.destination)}</dd>
+                          <dt>Hash</dt><dd>${escapeHtml(withdrawal.txHash)}</dd>
+                          <dt>Nota</dt><dd>${escapeHtml(withdrawal.note)}</dd>
+                        </dl>`,
+                      )
+                      .join('')
+                  : '<p class="muted">Sin retiros registrados.</p>'
+              }
+            </div>
+          </article>`,
+        )
+        .join('') || '<article>No hay cuentas Nano registradas.</article>'}
+    </main>
+  </body>
+</html>`
+
+const createNanoAccountRecord = async ({
+  label,
+  purpose,
+  notes,
+}: {
+  label?: string
+  purpose: NanoAccountRecord['purpose']
+  notes?: string
+}): Promise<NanoAccountRecord> => {
+  const generated = await createNanoAccount()
+  const now = new Date().toISOString()
+
+  return {
+    id: `nac_${randomUUID().replaceAll('-', '').slice(0, 18)}`,
+    account: generated.account,
+    publicKey: generated.publicKey,
+    encryptedPrivateKey: encryptSecret(generated.privateKey),
+    keyFingerprint: getKeyFingerprint(generated.privateKey),
+    status: 'AVAILABLE',
+    purpose,
+    label: label || undefined,
+    commissionAvailableXno: '0',
+    createdAt: now,
+    updatedAt: now,
+    notes: notes || undefined,
+    withdrawalHistory: [],
+  }
+}
 
 const handleApi = async (request: IncomingMessage, response: ServerResponse, url: URL) => {
   if (request.method === 'GET' && url.pathname === '/api/health') {
@@ -1430,6 +1727,150 @@ const handleAdmin = async (request: IncomingMessage, response: ServerResponse, u
   if (request.method === 'GET' && url.pathname === '/admin/offers') {
     const store = await readStore()
     sendHtml(response, 200, renderAdmin(store.offers))
+    return
+  }
+
+  if (request.method === 'GET' && url.pathname === '/admin/nano-accounts') {
+    const store = await readStore()
+    sendHtml(response, 200, renderNanoAccountsAdmin(store.nanoAccounts, getActiveCustodian(store).wallet, normalizeText(url.searchParams.get('message'))))
+    return
+  }
+
+  if (request.method === 'POST' && url.pathname === '/admin/nano-accounts/generate') {
+    const form = await readFormBody(request)
+    const purpose = String(form.get('purpose') ?? 'ESCROW')
+
+    if (!nanoAccountPurposes.includes(purpose as NanoAccountRecord['purpose'])) {
+      sendJson(response, 400, { error: 'Uso de cuenta invalido.' })
+      return
+    }
+
+    try {
+      const store = await readStore()
+      const account = await createNanoAccountRecord({
+        label: normalizeText(form.get('label')),
+        purpose: purpose as NanoAccountRecord['purpose'],
+        notes: normalizeText(form.get('notes')),
+      })
+      store.nanoAccounts.unshift(account)
+      await writeStore(store)
+      response.writeHead(303, { Location: '/admin/nano-accounts?message=Cuenta%20Nano%20generada', ...corsHeaders })
+      response.end()
+    } catch (error) {
+      sendJson(response, 422, { error: error instanceof Error ? error.message : 'No se pudo generar la cuenta Nano.' })
+    }
+    return
+  }
+
+  const nanoAccountUpdateMatch = url.pathname.match(/^\/admin\/nano-accounts\/([^/]+)\/update$/)
+
+  if (request.method === 'POST' && nanoAccountUpdateMatch) {
+    const accountId = decodeURIComponent(nanoAccountUpdateMatch[1])
+    const form = await readFormBody(request)
+    const status = String(form.get('status') ?? '')
+    const purpose = String(form.get('purpose') ?? '')
+
+    if (!nanoAccountStatuses.includes(status as NanoAccountStatus)) {
+      sendJson(response, 400, { error: 'Estado de cuenta invalido.' })
+      return
+    }
+
+    if (!nanoAccountPurposes.includes(purpose as NanoAccountRecord['purpose'])) {
+      sendJson(response, 400, { error: 'Uso de cuenta invalido.' })
+      return
+    }
+
+    const commissionAvailableXno = normalizeText(form.get('commissionAvailableXno')).replace(',', '.')
+    try {
+      if (BigInt(nanoToRaw(commissionAvailableXno || '0')) < 0n) throw new Error('Monto invalido')
+    } catch {
+      sendJson(response, 400, { error: 'Comision disponible invalida.' })
+      return
+    }
+
+    const store = await readStore()
+    const account = store.nanoAccounts.find((item) => item.id === accountId)
+
+    if (!account) {
+      sendJson(response, 404, { error: 'Cuenta Nano no encontrada.' })
+      return
+    }
+
+    account.status = status as NanoAccountStatus
+    account.purpose = purpose as NanoAccountRecord['purpose']
+    account.label = normalizeText(form.get('label')) || undefined
+    account.linkedOfferId = normalizeText(form.get('linkedOfferId')) || undefined
+    account.commissionAvailableXno = commissionAvailableXno || '0'
+    account.notes = normalizeText(form.get('notes')) || undefined
+    account.updatedAt = new Date().toISOString()
+    if (account.status === 'ASSIGNED') account.lastUsedAt = account.lastUsedAt ?? account.updatedAt
+
+    await writeStore(store)
+    response.writeHead(303, { Location: '/admin/nano-accounts?message=Cuenta%20actualizada', ...corsHeaders })
+    response.end()
+    return
+  }
+
+  const nanoAccountWithdrawalMatch = url.pathname.match(/^\/admin\/nano-accounts\/([^/]+)\/withdraw$/)
+
+  if (request.method === 'POST' && nanoAccountWithdrawalMatch) {
+    const accountId = decodeURIComponent(nanoAccountWithdrawalMatch[1])
+    const store = await readStore()
+    const account = store.nanoAccounts.find((item) => item.id === accountId)
+    const destination = getActiveCustodian(store).wallet
+
+    if (!account) {
+      sendJson(response, 404, { error: 'Cuenta Nano no encontrada.' })
+      return
+    }
+
+    const amountXno = account.commissionAvailableXno.replace(',', '.')
+
+    try {
+      if (BigInt(nanoToRaw(amountXno)) <= 0n) throw new Error('Monto invalido')
+    } catch {
+      sendJson(response, 400, { error: 'La cuenta no tiene comision disponible para retirar.' })
+      return
+    }
+
+    if (!nanoWalletId) {
+      sendJson(response, 409, { error: 'Configura NANO_WALLET_ID en el backend para habilitar retiros reales.' })
+      return
+    }
+
+    let withdrawal: Awaited<ReturnType<typeof sendFromPrivateKey>>
+
+    try {
+      withdrawal = await sendFromPrivateKey({
+        walletId: nanoWalletId,
+        privateKey: decryptSecret(account.encryptedPrivateKey),
+        sourceAccount: account.account,
+        destinationAccount: destination,
+        amountNano: amountXno,
+      })
+    } catch (error) {
+      sendJson(response, 422, { error: error instanceof Error ? error.message : 'No se pudo retirar desde la cuenta Nano.' })
+      return
+    }
+
+    account.withdrawalHistory.unshift({
+      id: `wdr_${randomUUID().replaceAll('-', '').slice(0, 18)}`,
+      amountXno,
+      destination,
+      txHash: withdrawal.blockHash,
+      createdAt: new Date().toISOString(),
+      note: withdrawal.receivedBlocks.length
+        ? `Retiro real. Bloques recibidos antes del envio: ${withdrawal.receivedBlocks.join(', ')}`
+        : 'Retiro real.',
+    })
+    account.updatedAt = new Date().toISOString()
+
+    account.commissionAvailableXno = '0'
+    account.status = account.status === 'ASSIGNED' ? 'LOCKED' : account.status
+
+    await writeStore(store)
+    response.writeHead(303, { Location: '/admin/nano-accounts?message=Retiro%20real%20enviado', ...corsHeaders })
+    response.end()
     return
   }
 

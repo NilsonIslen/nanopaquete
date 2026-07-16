@@ -784,8 +784,6 @@ export function Nanopaquete() {
             <div className="app-menu">
               <button type="button" onClick={() => { setActiveView('create-offer'); setIsMenuOpen(false) }}>Crear oferta</button>
               <button type="button" onClick={() => { setActiveView('wallet'); setIsMenuOpen(false) }}>Descargar wallet</button>
-              <button type="button" onClick={() => { setActiveView('donations'); setIsMenuOpen(false) }}>Donaciones</button>
-              <button type="button" onClick={() => { setActiveView('custodian-auth'); setIsMenuOpen(false) }}>Custodios</button>
               <button type="button" onClick={() => { setActiveView('guide'); setIsMenuOpen(false) }}>Guia</button>
             </div>
           )}
@@ -804,14 +802,14 @@ export function Nanopaquete() {
       {activeView === 'custodian-auth' && !custodianAuthIntent && (
         <section className="single-page-panel">
           <div className="panel">
-            <h2>Custodios</h2>
+            <h2>Custodio</h2>
             <p>Acceso solo para cuentas autorizadas.</p>
             {custodianSession ? (
               <>
                 {!!managedCustodians.length && (
                   <div className="private-box custodian-admin-box">
                     <div className="panel-heading">
-                      <h3>Custodios</h3>
+                      <h3>Custodio</h3>
                     </div>
                     <div className="custodian-list">
                       {displayedManagedCustodians.map((custodian) => (
@@ -920,8 +918,8 @@ export function Nanopaquete() {
       {activeView === 'custodian-auth' && custodianAuthIntent && (
         <section className="intro-band compact-intro-band auth-panel-band">
           <div className="private-box custodian-auth-box">
-            <p className="eyebrow">Acceso solo para custodios registrados</p>
-            <p>Transfiere {custodianAuthIntent.amountXno} XNO desde tu cuenta Nano de custodio a la cuenta lider asignada por Nanopaquete.</p>
+            <p className="eyebrow">Acceso privado de custodia</p>
+            <p>Transfiere {custodianAuthIntent.amountXno} XNO desde la cuenta Nano autorizada a la cuenta asignada por Nanopaquete.</p>
             <div className="payment-actions">
               <button className="primary-button" type="button" onClick={() => openNanoPayment(custodianAuthIntent.paymentUri)}>
                 <Wallet size={18} />
@@ -1010,38 +1008,31 @@ export function Nanopaquete() {
           <div className="panel guide-panel">
             <h2>Guía</h2>
             <h3>Condiciones generales</h3>
-            <p>Nanopaquete organiza negociaciones P2P con custodia Nano. La plataforma no persigue el precio del mercado: cada vendedor define cuánto espera recibir por su paquete de XNO y cada comprador decide qué oferta tomar. Esa competencia interna ayuda a evitar precios inflados o devaluados, siempre bajo el criterio de quienes poseen y demandan Nano.</p>
-            <h3>Vendedor</h3>
-            <p>El vendedor publica una oferta de Nano indicando primero la cantidad de XNO que quiere vender, el activo que espera recibir, el precio total del paquete y su contacto.</p>
-            <p>Con esos datos, Nanopaquete genera el pago exacto hacia el custodio seleccionado. Cuando detecta la transferencia, publica la oferta automáticamente. Después de publicar, el vendedor solo puede editar el precio.</p>
-            <p>Si el vendedor necesita retirar los fondos de una oferta publicada, debe simular una compra desde un equipo distinto al que usó para publicarla. En ese proceso también debe pagar los 0,1 XNO al custodio para que los fondos puedan liberarse.</p>
-            <p>Cuando un comprador toma una oferta, esta queda bloqueada junto con sus fondos. El vendedor recibe la información de contacto del comprador y solo puede liberar esos XNO hacia la wallet registrada por ese comprador.</p>
-            <p>Cuando recibe el pago acordado, el vendedor lo confirma desde la plataforma mediante una transferencia de 0,1 XNO al custodio. Esa confirmación habilita al custodio para liberar los fondos exclusivamente al comprador.</p>
-            <h3>Comprador</h3>
-            <p>El comprador es cualquier persona que toma una de las ofertas publicadas. Al hacerlo, ingresa la dirección Nano donde quiere recibir los fondos y su número de contacto.</p>
-            <p>Después de enviar esa información, recibe el contacto del vendedor para comunicarse y acordar cómo realizar el pago. Durante la negociación, los XNO quedan bajo custodia para que pueda pagar con mayor tranquilidad.</p>
-            <p>Es importante guardar el comprobante de pago en caso de conflicto y verificar muy bien la dirección Nano y el contacto ingresados. Si el comprador registra datos incorrectos y el custodio no puede comunicarse con él, el custodio dará prioridad a la parte con la que sí sea posible establecer comunicación.</p>
+            <p>Nanopaquete organiza negociaciones P2P de XNO con custodia automatizada en el backend. Todas las ofertas aparecen en una misma página y se diferencian por tipo: compra de Nano y venta de Nano.</p>
+            <p>La plataforma no persigue el precio del mercado. Cada usuario define cuántos XNO compra o vende, qué activo entrega o recibe a cambio y cuál es la cantidad de ese activo. Esa libertad crea un mercado interno donde la competencia entre ofertas regula la inflación o depreciación dentro de Nanopaquete.</p>
+            <p>Cuando una oferta entra en negociación, Nanopaquete crea una cuenta Nano temporal para custodiar los fondos de esa operación. Esa cuenta se guarda de forma segura en el servidor y no se muestra a los usuarios.</p>
+            <h3>Publicar venta de Nano</h3>
+            <p>El vendedor publica una oferta indicando la cantidad de XNO, el activo que recibe a cambio, la cantidad de ese activo y su número de contacto.</p>
+            <p>La oferta queda visible y vinculada al equipo desde el que fue creada. Mientras nadie la tome, el vendedor puede eliminarla. Las ofertas disponibles vencen automáticamente a las 24 horas.</p>
+            <p>Cuando un comprador toma la oferta, ingresa su número de contacto y la cuenta Nano donde espera recibir los fondos. Nanopaquete le informa que el vendedor está siendo notificado para depositar los XNO.</p>
+            <p>El vendedor recibe la notificación, ve el botón y el QR de depósito, y deposita la cantidad publicada más el 0,2% de comisión de plataforma.</p>
+            <p>Cuando el depósito queda confirmado, el vendedor ve el contacto del comprador y se le habilita el botón para confirmar el pago recibido. El comprador ve el contacto del vendedor y puede comunicarse para acordar el pago con la tranquilidad de que los XNO están en custodia.</p>
+            <p>Cuando el vendedor confirma que recibió el pago, Nanopaquete transfiere los XNO a la cuenta registrada por el comprador. La comisión queda disponible para retiro desde la página privada de Custodio.</p>
+            <h3>Publicar compra de Nano</h3>
+            <p>El comprador publica una oferta indicando la cantidad de XNO que quiere comprar, el activo que entrega a cambio, la cantidad de ese activo, su cuenta Nano receptora y su número de contacto.</p>
+            <p>Cuando un vendedor toma la oferta, ingresa su número de contacto. Nanopaquete crea la cuenta Nano temporal de custodia y habilita al vendedor el botón y el QR para depositar.</p>
+            <p>El vendedor deposita la cantidad de XNO de la oferta más el 0,2% de comisión de plataforma. Cuando el depósito queda confirmado, Nanopaquete notifica al comprador y muestra los números de contacto para que ambas partes acuerden el pago.</p>
+            <p>Cuando el comprador paga, el vendedor confirma la recepción del pago y Nanopaquete libera los XNO a la cuenta Nano registrada por el comprador. La comisión queda disponible para retiro desde la página privada de Custodio.</p>
             <h3>Custodio</h3>
-            <p>El custodio es una persona de confianza directa de la plataforma y forma parte de un grupo de custodios que sirven como intermediarios en las negociaciones.</p>
-            <p>En condiciones normales, el proceso es automático: cuando el vendedor confirma que recibió el pago, el custodio solo libera los fondos al comprador desde la opción habilitada, sin validaciones adicionales.</p>
-            <p>El custodio interviene cuando hay conflicto. En ese caso solicita comprobantes, revisa la situación y decide si libera los fondos al comprador o libera la oferta según corresponda.</p>
-            <p>Cada custodio recibe 0,1 XNO por intermediación, pagados por el vendedor al confirmar que recibió el pago de su contraparte.</p>
-            <p>Si un usuario pierde dinero por equivocación o mala fe de un custodio, los demás custodios deben reponer la pérdida del usuario y determinar si el custodio responsable continúa o es expulsado.</p>
-            <h3>Líderes</h3>
-            <p>Puede haber uno o varios líderes. Los líderes intermedian entre custodios y desarrolladores para mantener la plataforma funcionando y en constante actualización. También incluyen o expulsan custodios a nivel técnico según las solicitudes del grupo.</p>
-            <p>Los líderes también son custodios y tienen las mismas posibilidades de recibir ingresos que los demás custodios. Su trabajo adicional como líderes es un aporte voluntario y no reciben pago extra por esa función, conservando la naturaleza de Nano: personas que aportan a la red por principios propios y convicción sobre el proyecto.</p>
-            <p>La única excepción es la autenticación de custodios: cuando un custodio inicia sesión, Nanopaquete asigna aleatoriamente una cuenta Nano de un líder para recibir 0,01 XNO. Ese monto es mínimo y representativo; su finalidad es cumplir la función técnica de autenticar custodios, no pagar una retribución adicional por liderazgo.</p>
-            <p>Contacto del líder principal: <strong>+573008188284</strong>.</p>
+            <p>El custodio es la aplicación en el backend. Su función es crear y proteger las cuentas temporales de custodia, detectar depósitos, liberar fondos cuando corresponde y conservar la comisión de plataforma.</p>
+            <p>La página privada de Custodio permite revisar negociaciones, ver los contactos de las dos partes en caso de disputa y retirar la comisión disponible por cada operación completada.</p>
             <h3>Posibles disputas</h3>
             <div className="guide-disputes">
-              <p><strong>El comprador no responde:</strong> el vendedor debe intentar comunicarse con el comprador para que pague o libere la oferta. Si pasan 24 horas sin respuesta, el vendedor puede solicitar al custodio que libere la oferta para que vuelva a estar visible.</p>
-              <p><strong>El comprador responde, pero no paga después de 24 horas:</strong> se le solicita que libere la oferta. Si no atiende la solicitud, el vendedor informa al custodio. Tras revisar el caso, el custodio libera la oferta y reporta el contacto y la dirección Nano al líder para agregarlos a una lista negativa que impida negociar nuevamente con esos datos.</p>
-              <p><strong>El comprador paga, pero el vendedor no confirma:</strong> el comprador debe reportar el caso al custodio y enviar el comprobante de pago. El custodio revisa el soporte, se comunica con el vendedor y solicita la confirmación. Si el vendedor no atiende y el custodio identifica que el pago sí fue realizado, libera los fondos al comprador sin recibir comisión y reporta el contacto y la dirección Nano del vendedor a la lista negativa. Si el vendedor tiene más ofertas publicadas, se cierran y se le devuelven los XNO descontando el valor de la comisión.</p>
-              <p><strong>El comprador ingresó un contacto incorrecto:</strong> si no es posible establecer comunicación con el comprador, este debe cancelar la solicitud para liberar la publicación y tomarla de nuevo con los datos correctos.</p>
-              <p><strong>El comprador ingresó una cuenta Nano incorrecta:</strong> si lo detecta antes de la liberación, debe cancelar la solicitud y tomar la oferta nuevamente con la cuenta correcta. Si el proceso llega hasta el final y los fondos son liberados a una cuenta distinta, el comprador pierde el dinero y los fondos.</p>
-              <p><strong>El vendedor ingresó un contacto incorrecto:</strong> debe simular una compra desde otro equipo para cerrar la oferta y abrir una nueva con los datos correctos. La cuenta Nano del vendedor no debería fallar, porque se registra en el momento en que deposita los fondos.</p>
-              <p><strong>Hay una falla técnica al registrar los fondos del vendedor:</strong> el caso debe reportarse al líder para que lo revise junto con los custodios. Si la falla causa una pérdida, el líder y los custodios deben coordinar la reposición correspondiente.</p>
-              <p><strong>El custodio toma una decisión equivocada y una parte pierde dinero:</strong> el usuario afectado puede comunicarse con el líder. El líder revisa el caso con el custodio y, si confirma la equivocación, solicita que reponga el saldo del usuario. Si el custodio no responde, el caso se presenta al grupo de custodios, quienes deben reunir el saldo para reponer al usuario. El custodio responsable queda expulsado.</p>
+              <p><strong>Una parte no responde:</strong> la otra parte debe conservar comprobantes y esperar la revisión desde la página privada de Custodio.</p>
+              <p><strong>El pago externo no se confirma:</strong> los XNO permanecen en custodia hasta que exista una confirmación suficiente o una decisión administrativa.</p>
+              <p><strong>Una parte ingresó un contacto incorrecto:</strong> la revisión se hace con la información disponible en la negociación y los comprobantes que pueda aportar cada parte.</p>
+              <p><strong>El comprador ingresó una cuenta Nano incorrecta:</strong> la cuenta Nano debe revisarse antes de confirmar la operación, porque la liberación se realiza hacia la cuenta registrada en la negociación.</p>
+              <p><strong>Hay una falla técnica:</strong> la persona con acceso a la página privada de Custodio revisa los datos de la negociación, los depósitos, los contactos y el estado de la cuenta temporal.</p>
             </div>
           </div>
         </section>
@@ -1053,8 +1044,8 @@ export function Nanopaquete() {
         <div className="panel seller-panel">
           <div className="panel-heading">
             <h2>Crear oferta</h2>
-            <p>Completa los datos de la oferta y luego deposita los XNO que quieres vender. La oferta se publicará automáticamente cuando Nanopaquete confirme el depósito.</p>
-            <p>Si necesitas reembolsar una oferta publicada, deberás tomarla desde otro dispositivo y pagar la comisión de 0,1 XNO para que el custodio libere los fondos.</p>
+            <p>Completa los datos de la oferta para publicarla en el mercado de Nanopaquete. Cada usuario define la cantidad de XNO, el activo de intercambio y la cantidad de ese activo.</p>
+            <p>Las operaciones tomadas usan custodia Nano administrada por Nanopaquete y una comisión de plataforma del 0,2%.</p>
           </div>
 
           {!sellerPayment && !escrowSession && (

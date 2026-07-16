@@ -1,21 +1,41 @@
 # Nanopaquete
 
-App experimental para comprar y vender XNO con custodia manual.
+App experimental para comprar y vender XNO con custodia automatizada en el backend.
 
-## Flujo MVP
+## Flujo actual
 
-1. El vendedor completa la cantidad de XNO, activo a recibir, precio total del paquete y contacto privado.
-2. Nanopaquete genera un deposito por la cantidad exacta hacia la wallet de custodia.
-3. Al verificar el deposito, la oferta se publica automaticamente con los datos del formulario.
-4. La cantidad de XNO en venta queda definida por el monto exacto solicitado en el deposito.
-5. La oferta aparece publica sin mostrar el contacto del vendedor.
-6. Un comprador toma la oferta, registra su wallet Nano receptora y recibe el contacto del vendedor.
-7. La oferta pasa a negociacion y sigue visible con su estado.
-8. Los fondos solo deben liberarse a la wallet registrada por el comprador.
-9. Para confirmar que recibio el pago, el vendedor usa el boton Liberar fondos y paga la comision de custodia de 0.1 XNO desde la wallet que publico la oferta.
-10. Cuando Nanopaquete detecta esa comision, la oferta pasa a estado liberando.
-11. El custodio solo debe liberar fondos hacia la wallet del comprador cuando la oferta esta en estado liberando.
-12. Si hay disputa, el custodio revisa el caso y decide mantener bloqueado, cancelar o liberar segun corresponda.
+Nanopaquete publica ofertas de compra y venta de XNO en una misma pagina. Las ofertas de compra se diferencian visualmente de las ofertas de venta para que cada usuario pueda revisar el mercado disponible antes de publicar una oferta propia.
+
+La plataforma no persigue el precio del mercado. Cada usuario define cuanta cantidad del activo acepta entregar o recibir por sus XNO. Esa libertad crea un mercado interno donde la competencia entre ofertas regula la inflacion o depreciacion dentro de la plataforma.
+
+### Publicar venta de Nano
+
+1. El vendedor crea una oferta de venta con la cantidad de XNO, el activo que recibe a cambio, la cantidad de ese activo y su numero de contacto.
+2. La oferta queda publicada y vinculada al equipo desde el que fue creada.
+3. Mientras nadie tome la oferta, el vendedor puede eliminarla. Las ofertas disponibles vencen automaticamente a las 24 horas.
+4. El comprador toma la oferta e ingresa su numero de contacto y la cuenta Nano donde espera recibir los fondos.
+5. Nanopaquete crea una cuenta Nano temporal para la custodia de esa negociacion, la guarda de forma segura en el servidor y no la muestra a los usuarios.
+6. El comprador ve que el vendedor esta siendo notificado para depositar los XNO.
+7. El vendedor recibe la notificacion, ve el boton y el QR de deposito, y deposita la cantidad publicada mas el 0,2% de comision de plataforma.
+8. Cuando el deposito queda confirmado, el vendedor ve el contacto del comprador y se le habilita el boton para confirmar el pago recibido.
+9. El comprador ve el contacto del vendedor y el mensaje de que los XNO estan en custodia para que pueda comunicarse y acordar el pago.
+10. Cuando el vendedor confirma que recibio el pago, Nanopaquete transfiere los XNO a la cuenta Nano registrada por el comprador. La comision queda disponible para retiro desde la pagina privada de Custodio.
+
+### Publicar compra de Nano
+
+1. El comprador crea una oferta de compra con la cantidad de XNO que quiere comprar, el activo que entrega a cambio, la cantidad de ese activo, su cuenta Nano receptora y su numero de contacto.
+2. La oferta queda publicada junto a las ofertas de venta, diferenciada visualmente por tipo.
+3. Cuando un vendedor toma la oferta, ingresa su numero de contacto.
+4. Nanopaquete crea una cuenta Nano temporal para la custodia de esa negociacion, la guarda de forma segura en el servidor y habilita al vendedor el boton y el QR para depositar.
+5. El vendedor deposita la cantidad de XNO de la oferta mas el 0,2% de comision de plataforma.
+6. Cuando el deposito queda confirmado, Nanopaquete notifica al comprador y muestra los numeros de contacto para que ambas partes acuerden el pago.
+7. Cuando el comprador paga, el vendedor confirma la recepcion del pago y Nanopaquete libera los XNO a la cuenta Nano registrada por el comprador. La comision queda disponible para retiro desde la pagina privada de Custodio.
+
+## Custodio
+
+La custodia de XNO la administra Nanopaquete desde el backend. La pagina privada de Custodio permite revisar negociaciones, ver los contactos de las dos partes en caso de disputa y retirar la comision disponible por cada operacion completada.
+
+La pagina de Custodio es una direccion privada para la persona autorizada. La navegacion publica muestra las ofertas, la creacion de ofertas, la descarga de wallet y la guia.
 
 ## Comandos
 
@@ -31,15 +51,17 @@ npm run lint
 
 - `VITE_NANOPAQUETE_API_URL`: URL del backend. En local usa `http://localhost:8789/api`.
 - `NANOPAQUETE_API_PORT`: puerto API, por defecto `8789`.
-- Custodio por defecto: `Nilson Islen Castrillon`.
-- `NANOPAQUETE_ESCROW_WALLET`: wallet Nano del primer custodio. Por defecto usa `nano_1j7csyciamkzktswyxey5yt6f1rg1zbw3rtioe7xdze4fekkbo7zxri3ijxd`.
-- `NANOPAQUETE_CUSTODIAN_CONTACT`: contacto privado del primer custodio. Por defecto usa `+573008188284`.
-- `NANOPAQUETE_CUSTODIANS_JSON`: lista JSON opcional para multiples custodios, con campos `id`, `name`, `wallet` y `contact`. Por ahora Nanopaquete usa el primer custodio valido de la lista.
+- `NANOPAQUETE_ESCROW_WALLET`: wallet Nano de custodia. Por defecto usa `nano_1j7csyciamkzktswyxey5yt6f1rg1zbw3rtioe7xdze4fekkbo7zxri3ijxd`.
+- `NANOPAQUETE_CUSTODIAN_CONTACT`: contacto privado para administracion de custodia. Por defecto usa `+573008188284`.
+- `NANOPAQUETE_ACCOUNT_SECRET`: secreto usado para cifrar las claves privadas de las cuentas Nano generadas por el backend. En produccion debe ser una cadena larga y privada.
 - `NANOPAQUETE_ADMIN_USER`: usuario admin, por defecto `admin`.
 - `NANOPAQUETE_ADMIN_PASSWORD`: clave admin, por defecto `nanopaquete`.
 - `NANO_RPC_URL`: nodo Nano RPC, por defecto `http://127.0.0.1:7076`.
 - `NANO_RPC_FALLBACK_URLS`: nodos RPC alternos separados por coma.
+- `NANO_WALLET_ID`: wallet local del nodo Nano usada para importar temporalmente las claves cifradas y retirar fondos desde las cuentas generadas. El nodo debe permitir comandos de control.
 
-## Admin
+## Pagina privada
 
-`/admin/offers` permite revisar ofertas, negociaciones y cambiar estados manualmente.
+`/admin/offers` permite revisar ofertas, negociaciones, contactos de las partes y estados operativos.
+
+`/admin/nano-accounts` permite generar cuentas Nano reales desde el nodo RPC, guardar la clave privada cifrada, administrar estado/uso/notas y retirar la comision disponible hacia la wallet de custodia predeterminada.
