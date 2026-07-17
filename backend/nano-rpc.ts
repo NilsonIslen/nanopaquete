@@ -565,7 +565,7 @@ async function processStateBlock(block: Record<string, string>, subtype: 'open' 
     action: 'process',
     json_block: 'true',
     subtype,
-    block: JSON.stringify(block),
+    block,
   })
   const blockHash = String(data.hash ?? '').toUpperCase()
   if (!isNanoHash(blockHash)) throw new Error('El nodo Nano no devolvio un hash valido para el envio.')
