@@ -3,6 +3,8 @@ import * as nanocurrency from 'nanocurrency'
 const RAW_PER_NANO = 10n ** 30n
 const RPC_TIMEOUT_MS = Number(process.env.NANO_RPC_TIMEOUT_MS ?? 8000)
 const DEFAULT_NANO_RPC_URL = 'http://127.0.0.1:7076'
+const NANO_RECEIVE_WORK_THRESHOLD = 'fffffe0000000000'
+const NANO_SEND_WORK_THRESHOLD = 'fffffff800000000'
 const rpcCooldowns = new Map<string, number>()
 
 type RpcOptions = {
@@ -467,7 +469,7 @@ async function sendFromPrivateKeyStateless({
     if (!isNanoHash(hash) || !entry.amount) continue
     const subtype = frontier ? 'receive' : 'open'
     const nextBalanceRaw = (balanceRaw + BigInt(entry.amount)).toString()
-    const work = await getWork(frontier ?? publicKey)
+    const work = await getWork(frontier ?? publicKey, NANO_RECEIVE_WORK_THRESHOLD)
     const receive = nanocurrency.createBlock(privateKey, {
       work,
       representative,
@@ -485,7 +487,7 @@ async function sendFromPrivateKeyStateless({
   if (balanceRaw < amountRaw) throw new Error('La cuenta temporal no tiene saldo suficiente para liberar los fondos.')
   if (!frontier) throw new Error('La cuenta temporal no tiene un bloque abierto para enviar fondos.')
 
-  const work = await getWork(frontier)
+  const work = await getWork(frontier, NANO_SEND_WORK_THRESHOLD)
   const send = nanocurrency.createBlock(privateKey, {
     work,
     representative,
@@ -543,19 +545,20 @@ async function getAccountInfo(account: string) {
   }
 }
 
-async function getWork(hashOrPublicKey: string) {
+async function getWork(hashOrPublicKey: string, threshold: string) {
   try {
     const data = await nanoRpc({
       action: 'work_generate',
       hash: hashOrPublicKey,
+      difficulty: threshold,
     })
     const work = String(data.work ?? '')
-    if (nanocurrency.checkWork(work)) return work
+    if (nanocurrency.validateWork({ blockHash: hashOrPublicKey, work, threshold })) return work
   } catch {
     // Fall through to local work generation.
   }
 
-  const work = await nanocurrency.computeWork(hashOrPublicKey)
+  const work = await nanocurrency.computeWork(hashOrPublicKey, { workThreshold: threshold })
   if (!work) throw new Error('No se pudo generar work para publicar la transferencia Nano.')
   return work
 }
