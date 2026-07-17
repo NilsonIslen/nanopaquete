@@ -60,6 +60,7 @@ export type PublicOffer = {
   status: OfferStatus
   createdAt: string
   isOwnOffer?: boolean
+  isPublishedOffer?: boolean
   canEditPrice?: boolean
   canDeleteOffer?: boolean
   canDepositNano?: boolean

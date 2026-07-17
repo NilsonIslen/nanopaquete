@@ -260,6 +260,11 @@ const groupOffers = (offers: PublicOffer[]): OfferGroup[] => {
     .sort((left, right) => right.offers.length - left.offers.length || left.title.localeCompare(right.title, 'es'))
 }
 
+const getPerspectiveOfferClass = (offer: PublicOffer) => {
+  const isBuyingNano = offer.isPublishedOffer ? offer.offerType === 'BUY' : offer.offerType === 'SELL'
+  return isBuyingNano ? 'buy-offer-card' : 'sell-offer-card'
+}
+
 const getInitialView = (): AppView => {
   const params = new URLSearchParams(window.location.search)
   return params.get('admin') === '1' || window.location.hash === '#admin' ? 'custodian-auth' : 'offers'
@@ -1056,8 +1061,6 @@ export function Nanopaquete() {
         <div className="panel seller-panel">
           <div className="panel-heading">
             <h2>Crear oferta</h2>
-            <p>Completa los datos de la oferta para publicarla en el mercado de Nanopaquete. Cada usuario define la cantidad de XNO, el activo de intercambio y la cantidad de ese activo.</p>
-            <p>Las operaciones tomadas usan custodia Nano administrada por Nanopaquete y una comisión de plataforma del 0,2%.</p>
           </div>
 
           <div className="offer-type-tabs" role="tablist" aria-label="Tipo de oferta">
@@ -1235,8 +1238,14 @@ export function Nanopaquete() {
                   const isSelected = selectedOffer?.id === offer.id
 
                   return (
-                    <article className={`${isSelected ? 'offer-card selected-offer-card' : 'offer-card'} ${offer.offerType === 'BUY' ? 'buy-offer-card' : 'sell-offer-card'}`} key={offer.id}>
+                    <article
+                      className={`${isSelected ? 'offer-card selected-offer-card' : 'offer-card'} ${getPerspectiveOfferClass(offer)}`}
+                      key={offer.id}
+                    >
                   <div>
+                    {offer.isPublishedOffer && (
+                      <small>{offer.offerType === 'BUY' ? 'Estás comprando Nano' : 'Estás vendiendo Nano'}</small>
+                    )}
                     <p className="offer-amount">{offer.amountXno} XNO</p>
                     <p>{offer.price} {offer.currency}</p>
                     <small>Estado: {offer.status === 'ACTIVE' ? 'Activa' : offer.status === 'NEGOTIATION' ? 'En negociacion' : 'Liberando'}</small>
@@ -1302,7 +1311,7 @@ export function Nanopaquete() {
                     <div className="private-box release-fee-box inline-release-fee-box">
                       <p className="eyebrow">Deposito de Nano</p>
                       <h3>Deposita {releaseFeeIntent.amountXno} XNO en la custodia.</h3>
-                      <p>Cuando la app detecte esa transferencia, el comprador podra pagar con la tranquilidad de que los XNO estan en custodia.</p>
+                      <p>Cuando la app detecte esa transferencia, se mostraran los datos de contacto para continuar la negociacion.</p>
                       <div className="payment-actions">
                         <button className="primary-button" type="button" onClick={() => openNanoPayment(releaseFeeIntent.paymentUri)}>
                           <Wallet size={18} />
@@ -1313,7 +1322,7 @@ export function Nanopaquete() {
                           Copiar custodia
                         </button>
                       </div>
-                      <div className="payment-qr" aria-label="QR de comision de liberacion">
+                      <div className="payment-qr" aria-label="QR de deposito Nano">
                         <QRCodeSVG value={releaseFeeIntent.paymentUri} size={176} marginSize={2} />
                       </div>
                       <dl>
@@ -1331,12 +1340,22 @@ export function Nanopaquete() {
                       </button>
                     </div>
                   )}
-                  {offer.status === 'NEGOTIATION' && offer.isOwnOffer && (
+                  {offer.status === 'NEGOTIATION' && offer.isPublishedOffer && !offer.sellerDepositConfirmed && (
+                    <div className="private-box seller-buyer-box">
+                      <p className="eyebrow">Alguien tomó tu oferta</p>
+                      <p>
+                        {offer.canDepositNano
+                          ? 'Deposita los XNO para ver los datos de contacto y continuar la negociación.'
+                          : 'Espera la confirmación del depósito Nano para ver los datos de contacto y continuar la negociación.'}
+                      </p>
+                    </div>
+                  )}
+                  {offer.status === 'NEGOTIATION' && offer.isPublishedOffer && (
                     (offer.offerType === 'SELL' && offer.buyerContact) ||
                     (offer.offerType === 'BUY' && offer.sellerContact)
                   ) && (
                     <div className="private-box seller-buyer-box">
-                      <p className="eyebrow">Persona que tomo esta oferta</p>
+                      <p className="eyebrow">Persona que tomó esta oferta</p>
                       <dl>
                         <dt>Pais</dt>
                         <dd>{offer.offerType === 'BUY' ? offer.sellerCountry || 'No informado' : offer.buyerCountry || 'No informado'}</dd>
@@ -1480,20 +1499,25 @@ export function Nanopaquete() {
                   <h3>El vendedor ya confirmó que recibió el pago.</h3>
                   <p>La liberación de los XNO está pendiente de Nanopaquete. Si se tarda, comunícate con el administrador para consultar el estado.</p>
                 </>
-              ) : !takenOffer.offer.sellerDepositConfirmed ? (
+              ) : !takenOffer.offer.sellerDepositConfirmed && takenOffer.offer.offerType === 'SELL' ? (
                 <>
                   <h3>La oferta fue tomada y el vendedor debe depositar los XNO.</h3>
-                  <p>Espera la confirmacion del deposito antes de enviar el pago externo. Usa el contacto del administrador si el proceso se queda detenido.</p>
+                  <p>Espera la confirmación del depósito antes de enviar el pago externo. Usa el contacto del administrador si el proceso se queda detenido.</p>
+                </>
+              ) : !takenOffer.offer.sellerDepositConfirmed ? (
+                <>
+                  <h3>Deposita los XNO para iniciar la negociación.</h3>
+                  <p>Después de confirmar el depósito, se mostrarán los datos del comprador para acordar el pago externo.</p>
                 </>
               ) : (
                 <>
-                  <h3>Comunícate con el vendedor para acordar cómo harás el pago.</h3>
-                  <p>Los XNO de esta oferta ya están bloqueados en custodia. El vendedor solo puede liberar a la cuenta que registraste cuando reciba el pago.</p>
-                  <p>Usa el contacto del administrador solo si ocurre un contratiempo que no puedas solucionar directamente con el vendedor.</p>
+                  <h3>{takenOffer.offer.offerType === 'BUY' ? 'Comunícate con el comprador para acordar el pago.' : 'Comunícate con el vendedor para acordar cómo harás el pago.'}</h3>
+                  <p>{takenOffer.offer.offerType === 'BUY' ? 'Los XNO ya están bloqueados en custodia. Confirma el pago recibido cuando el comprador complete el pago externo.' : 'Los XNO de esta oferta ya están bloqueados en custodia. El vendedor solo puede liberar a la cuenta que registraste cuando reciba el pago.'}</p>
+                  <p>Usa el contacto del administrador solo si ocurre un contratiempo que no puedas solucionar directamente con la otra parte.</p>
                 </>
               )}
               <dl>
-                {takenOffer.offer.status === 'NEGOTIATION' && (
+                {takenOffer.offer.status === 'NEGOTIATION' && takenOffer.offer.sellerDepositConfirmed && (
                   <>
                     <dt>{takenOffer.offer.offerType === 'BUY' ? 'Pais comprador' : 'Pais vendedor'}</dt>
                     <dd>{takenOffer.offer.offerType === 'BUY' ? takenOffer.buyerCountry || 'No informado' : takenOffer.sellerCountry || 'No informado'}</dd>

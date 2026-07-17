@@ -572,9 +572,9 @@ const releaseTakenOffer = (offer: OfferRecord) => {
 
 const publicOffer = (offer: OfferRecord, context: { clientSessionId?: string; custodianSession?: CustodianSession } = {}) => {
   const offerType = offer.offerType ?? 'SELL'
-  const isSellOwner = Boolean(context.clientSessionId && offer.sellerSessionId && offer.sellerSessionId === context.clientSessionId)
-  const isBuyOwner = Boolean(offerType === 'BUY' && context.clientSessionId && offer.buyerSessionId === context.clientSessionId)
-  const isOwner = isSellOwner || isBuyOwner
+  const isSellPublisher = Boolean(offerType === 'SELL' && context.clientSessionId && offer.sellerSessionId && offer.sellerSessionId === context.clientSessionId)
+  const isBuyPublisher = Boolean(offerType === 'BUY' && context.clientSessionId && offer.buyerSessionId === context.clientSessionId)
+  const isPublisher = isSellPublisher || isBuyPublisher
   const isNanoSeller = Boolean(context.clientSessionId && offer.sellerSessionId && offer.sellerSessionId === context.clientSessionId)
   const isCustodian = Boolean(context.custodianSession && context.custodianSession.custodianId === offer.custodianId)
 
@@ -586,29 +586,30 @@ const publicOffer = (offer: OfferRecord, context: { clientSessionId?: string; cu
     price: offer.price,
     status: offer.status,
     createdAt: offer.createdAt,
-    isOwnOffer: isOwner,
-    canEditPrice: isOwner && offer.status === 'ACTIVE',
-    canDeleteOffer: isOwner && offer.status === 'ACTIVE',
+    isOwnOffer: isPublisher || isNanoSeller,
+    isPublishedOffer: isPublisher,
+    canEditPrice: isPublisher && offer.status === 'ACTIVE',
+    canDeleteOffer: isPublisher && offer.status === 'ACTIVE',
     canDepositNano: isNanoSeller && offer.status === 'NEGOTIATION' && !offer.paymentHash,
     canConfirmPayment: isNanoSeller && offer.status === 'NEGOTIATION' && Boolean(offer.paymentHash),
     canCustodianReleaseOffer: isCustodian && canCustodianReleaseTakenOffer(offer),
     canCustodianReleaseFunds: isCustodian && offer.status === 'RELEASING',
     sellerDepositConfirmed: Boolean(offer.paymentHash),
-    ...(isSellOwner && offer.status === 'NEGOTIATION' && offer.buyerContact
+    ...(isSellPublisher && offer.status === 'NEGOTIATION' && offer.paymentHash && offer.buyerContact
       ? {
           buyerCountry: offer.buyerCountry,
           buyerDialCode: offer.buyerDialCode,
           buyerContact: offer.buyerContact,
         }
       : {}),
-    ...(isBuyOwner && offer.status === 'NEGOTIATION' && offer.sellerContact
+    ...(isBuyPublisher && offer.status === 'NEGOTIATION' && offer.paymentHash && offer.sellerContact
       ? {
           sellerCountry: offer.sellerCountry,
           sellerDialCode: offer.sellerDialCode,
           sellerContact: offer.sellerContact,
         }
       : {}),
-    ...(isNanoSeller && offer.status === 'NEGOTIATION' && offer.buyerContact
+    ...(isNanoSeller && offer.status === 'NEGOTIATION' && offer.paymentHash && offer.buyerContact
       ? {
           buyerCountry: offer.buyerCountry,
           buyerDialCode: offer.buyerDialCode,
@@ -630,12 +631,12 @@ const publicOffer = (offer: OfferRecord, context: { clientSessionId?: string; cu
 
 const takenOfferResponse = (store: Store, offer: OfferRecord, clientSessionId?: string) => ({
   offer: publicOffer(offer, { clientSessionId }),
-  sellerContact: offer.sellerContact ?? '',
-  sellerCountry: offer.sellerCountry,
-  sellerDialCode: offer.sellerDialCode,
-  buyerContact: offer.buyerContact ?? '',
-  buyerCountry: offer.buyerCountry,
-  buyerDialCode: offer.buyerDialCode,
+  sellerContact: offer.paymentHash ? offer.sellerContact ?? '' : '',
+  sellerCountry: offer.paymentHash ? offer.sellerCountry : undefined,
+  sellerDialCode: offer.paymentHash ? offer.sellerDialCode : undefined,
+  buyerContact: offer.paymentHash ? offer.buyerContact ?? '' : '',
+  buyerCountry: offer.paymentHash ? offer.buyerCountry : undefined,
+  buyerDialCode: offer.paymentHash ? offer.buyerDialCode : undefined,
   custodianContact: getCustodianById(store, offer.custodianId).contact,
 })
 
