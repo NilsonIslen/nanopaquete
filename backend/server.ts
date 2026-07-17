@@ -611,10 +611,6 @@ const refundDetectedDepositBeforeCancel = async (store: Store, offer: OfferRecor
     return undefined
   }
 
-  if (!nanoWalletId) {
-    throw new Error('Se detecto un deposito al cancelar, pero falta configurar NANO_WALLET_ID para devolverlo.')
-  }
-
   const refund = await sendFromPrivateKey({
     walletId: nanoWalletId,
     privateKey: decryptSecret(escrowAccount.encryptedPrivateKey),
@@ -647,7 +643,6 @@ const releaseOfferFunds = async (store: Store, offer: OfferRecord) => {
 
   const escrowAccount = getOfferEscrowAccount(store, offer)
   if (!escrowAccount) throw new Error('Esta oferta no tiene cuenta temporal de custodia asociada.')
-  if (!nanoWalletId) throw new Error('Configura NANO_WALLET_ID en el backend para habilitar liberaciones reales.')
 
   const withdrawal = await sendFromTemporaryAccountWithRetry({
     walletId: nanoWalletId,
@@ -2286,11 +2281,6 @@ const handleAdmin = async (request: IncomingMessage, response: ServerResponse, u
       if (BigInt(nanoToRaw(amountXno)) <= 0n) throw new Error('Monto invalido')
     } catch {
       sendJson(response, 400, { error: 'La cuenta no tiene comision disponible para retirar.' })
-      return
-    }
-
-    if (!nanoWalletId) {
-      sendJson(response, 409, { error: 'Configura NANO_WALLET_ID en el backend para habilitar retiros reales.' })
       return
     }
 
