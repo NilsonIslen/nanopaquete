@@ -267,7 +267,12 @@ const pickRandomLeaderCustodian = (store: Store) => {
   const leaders = getLeaderCustodians(store)
   return leaders[Math.floor(Math.random() * leaders.length)] ?? getActiveCustodian(store)
 }
-const custodyFeeXno = process.env.NANOPAQUETE_CUSTODY_FEE_XNO ?? '0.1'
+const configuredCustodyFeeBps = Number(process.env.NANOPAQUETE_CUSTODY_FEE_BPS ?? '20')
+const custodyFeeBps = BigInt(
+  Number.isFinite(configuredCustodyFeeBps) && configuredCustodyFeeBps >= 0
+    ? Math.trunc(configuredCustodyFeeBps)
+    : 20,
+)
 const custodianAuthAmountXno = process.env.NANOPAQUETE_CUSTODIAN_AUTH_XNO ?? '0.01'
 const sellerPaymentTtlMs = Number(process.env.NANOPAQUETE_SELLER_PAYMENT_TTL_MS ?? 60 * 60 * 1000)
 const releaseFeeTtlMs = Number(process.env.NANOPAQUETE_RELEASE_FEE_TTL_MS ?? 60 * 60 * 1000)
@@ -526,6 +531,9 @@ const rawToNano = (raw: bigint) => {
 const addNanoAmounts = (...amounts: string[]) =>
   rawToNano(amounts.reduce((total, amount) => total + BigInt(nanoToRaw(amount)), 0n))
 
+const getCustodyFeeXno = (amountXno: string) =>
+  rawToNano((BigInt(nanoToRaw(amountXno)) * custodyFeeBps) / 10000n)
+
 const getOfferEscrowAccount = (store: Store, offer: OfferRecord) =>
   offer.escrowNanoAccountId
     ? store.nanoAccounts.find((account) => account.id === offer.escrowNanoAccountId)
@@ -754,7 +762,7 @@ const escrowSessionResponse = (store: Store, escrow: EscrowRecord) => {
   custodianName: custodian.name,
   custodianContact: custodian.contact,
   escrowWallet: custodian.wallet,
-  custodyFeeXno,
+  custodyFeeXno: getCustodyFeeXno(escrow.amountXno),
 }
 }
 
@@ -1549,7 +1557,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     store.offers.unshift(offer)
     await writeStore(store)
 
-    sendJson(response, 201, { offer: publicOffer(offer, { clientSessionId }), sellerPrivateCode: offer.sellerPrivateCode, custodianContact: custodian.contact, custodyFeeXno })
+    sendJson(response, 201, { offer: publicOffer(offer, { clientSessionId }), sellerPrivateCode: offer.sellerPrivateCode, custodianContact: custodian.contact, custodyFeeXno: getCustodyFeeXno(offer.amountXno) })
     return
   }
 
@@ -1611,7 +1619,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
 
     store.offers.unshift(offer)
     await writeStore(store)
-    sendJson(response, 201, { offer: publicOffer(offer, { clientSessionId }), sellerPrivateCode: '', custodianContact: custodian.contact, custodyFeeXno })
+    sendJson(response, 201, { offer: publicOffer(offer, { clientSessionId }), sellerPrivateCode: '', custodianContact: custodian.contact, custodyFeeXno: getCustodyFeeXno(offer.amountXno) })
     return
   }
 
@@ -1905,16 +1913,21 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     store.releaseFeeIntents = store.releaseFeeIntents.filter(
       (intent) => intent.status !== 'PENDING' || new Date(intent.expiresAt).getTime() > now,
     )
+    const custodyFeeXno = getCustodyFeeXno(offer.amountXno)
+    const depositAmountXno = addNanoAmounts(offer.amountXno, custodyFeeXno)
     const existing = store.releaseFeeIntents.find(
       (intent) => intent.offerId === offer.id && intent.status === 'PENDING' && intent.receiverAddress === escrowAccount.account,
     )
 
     if (existing) {
-      sendJson(response, 200, existing)
-      return
+      if (existing.amountXno !== depositAmountXno) {
+        existing.status = 'EXPIRED'
+      } else {
+        sendJson(response, 200, existing)
+        return
+      }
     }
 
-    const depositAmountXno = addNanoAmounts(offer.amountXno, custodyFeeXno)
     const intent: ReleaseFeeIntent = {
       id: `rel_${randomUUID().replaceAll('-', '').slice(0, 18)}`,
       offerId: offer.id,
@@ -1998,6 +2011,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       offer.status = 'RELEASED'
       offer.custodianReleaseHash = withdrawal.blockHash
       offer.closedAt = new Date().toISOString()
+      const custodyFeeXno = getCustodyFeeXno(offer.amountXno)
       escrowAccount.commissionAvailableXno = addNanoAmounts(escrowAccount.commissionAvailableXno || '0', custodyFeeXno)
       escrowAccount.updatedAt = new Date().toISOString()
       escrowAccount.notes = [

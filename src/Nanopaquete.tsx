@@ -1397,7 +1397,7 @@ export function Nanopaquete() {
                       <p className="eyebrow">Alguien tomó tu oferta</p>
                       <p>
                         {offer.canDepositNano
-                          ? 'Deposita los XNO en la cuenta temporal. El QR de depósito aparece en esta tarjeta.'
+                          ? 'Deposita los XNO en la cuenta temporal para continuar la negociación.'
                           : 'Espera la confirmación del depósito Nano para ver los datos de contacto y continuar la negociación.'}
                       </p>
                     </div>
