@@ -1346,7 +1346,7 @@ export function Nanopaquete() {
                       onClick={() => void handleConfirmSellerPayment(offer.id)}
                       disabled={loading === `confirm-payment:${offer.id}`}
                     >
-                      Confirmar pago recibido
+                      {offer.status === 'RELEASING' ? 'Reintentar liberación' : 'Confirmar pago recibido'}
                     </button>
                   )}
                   {offer.canCancelTake && !takenOffer && (

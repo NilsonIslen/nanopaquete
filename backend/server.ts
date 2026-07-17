@@ -637,6 +637,41 @@ const refundDetectedDepositBeforeCancel = async (store: Store, offer: OfferRecor
   return refund.blockHash
 }
 
+const releaseOfferFunds = async (store: Store, offer: OfferRecord) => {
+  if (offer.status === 'RELEASED' && offer.custodianReleaseHash) {
+    return { blockHash: offer.custodianReleaseHash, receivedBlocks: [] }
+  }
+
+  if (!offer.paymentHash) throw new Error('Primero confirma el deposito Nano en custodia.')
+  if (!offer.buyerNanoAddress) throw new Error('Esta oferta no tiene wallet compradora registrada.')
+
+  const escrowAccount = getOfferEscrowAccount(store, offer)
+  if (!escrowAccount) throw new Error('Esta oferta no tiene cuenta temporal de custodia asociada.')
+  if (!nanoWalletId) throw new Error('Configura NANO_WALLET_ID en el backend para habilitar liberaciones reales.')
+
+  const withdrawal = await sendFromTemporaryAccountWithRetry({
+    walletId: nanoWalletId,
+    privateKey: decryptSecret(escrowAccount.encryptedPrivateKey),
+    sourceAccount: escrowAccount.account,
+    destinationAccount: offer.buyerNanoAddress,
+    amountNano: offer.amountXno,
+  })
+
+  offer.status = 'RELEASED'
+  offer.custodianReleaseHash = withdrawal.blockHash
+  offer.closedAt = new Date().toISOString()
+  const custodyFeeXno = getCustodyFeeXno(offer.amountXno)
+  escrowAccount.commissionAvailableXno = addNanoAmounts(escrowAccount.commissionAvailableXno || '0', custodyFeeXno)
+  escrowAccount.updatedAt = new Date().toISOString()
+  escrowAccount.notes = [
+    escrowAccount.notes,
+    `Liberacion de ${offer.amountXno} XNO a ${offer.buyerNanoAddress}. Comision disponible: ${custodyFeeXno} XNO.`,
+  ].filter(Boolean).join('\n')
+  store.usedPayments.push({ hash: withdrawal.blockHash, purpose: 'custodian_release', createdAt: new Date().toISOString() })
+
+  return withdrawal
+}
+
 const getValidCustodianSession = (store: Store, sessionId: string) => {
   const normalized = normalizeClientSessionId(sessionId)
   if (!normalized) return undefined
@@ -699,7 +734,10 @@ const publicOffer = (offer: OfferRecord, context: { clientSessionId?: string; cu
     canEditPrice: isPublisher && offer.status === 'ACTIVE',
     canDeleteOffer: isPublisher && offer.status === 'ACTIVE',
     canDepositNano: isNanoSeller && offer.status === 'NEGOTIATION' && !offer.paymentHash,
-    canConfirmPayment: isNanoSeller && offer.status === 'NEGOTIATION' && Boolean(offer.paymentHash),
+    canConfirmPayment: isNanoSeller && Boolean(offer.paymentHash) && (
+      offer.status === 'NEGOTIATION' ||
+      (offer.status === 'RELEASING' && !offer.custodianReleaseHash)
+    ),
     canCancelTake: (isPublisher || isTaker) && offer.status === 'NEGOTIATION' && !offer.paymentHash,
     canCustodianReleaseOffer: isCustodian && canCustodianReleaseTakenOffer(offer),
     canCustodianReleaseFunds: isCustodian && offer.status === 'RELEASING',
@@ -1983,42 +2021,8 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       return
     }
 
-    if (!offer.buyerNanoAddress) {
-      sendJson(response, 409, { error: 'Esta oferta no tiene wallet compradora registrada.' })
-      return
-    }
-
-    const escrowAccount = getOfferEscrowAccount(store, offer)
-    if (!escrowAccount) {
-      sendJson(response, 409, { error: 'Esta oferta no tiene cuenta temporal de custodia asociada.' })
-      return
-    }
-
-    if (!nanoWalletId) {
-      sendJson(response, 409, { error: 'Configura NANO_WALLET_ID en el backend para habilitar liberaciones reales.' })
-      return
-    }
-
     try {
-      const withdrawal = await sendFromTemporaryAccountWithRetry({
-        walletId: nanoWalletId,
-        privateKey: decryptSecret(escrowAccount.encryptedPrivateKey),
-        sourceAccount: escrowAccount.account,
-        destinationAccount: offer.buyerNanoAddress,
-        amountNano: offer.amountXno,
-      })
-
-      offer.status = 'RELEASED'
-      offer.custodianReleaseHash = withdrawal.blockHash
-      offer.closedAt = new Date().toISOString()
-      const custodyFeeXno = getCustodyFeeXno(offer.amountXno)
-      escrowAccount.commissionAvailableXno = addNanoAmounts(escrowAccount.commissionAvailableXno || '0', custodyFeeXno)
-      escrowAccount.updatedAt = new Date().toISOString()
-      escrowAccount.notes = [
-        escrowAccount.notes,
-        `Liberacion de ${offer.amountXno} XNO a ${offer.buyerNanoAddress}. Comision disponible: ${custodyFeeXno} XNO.`,
-      ].filter(Boolean).join('\n')
-      store.usedPayments.push({ hash: withdrawal.blockHash, purpose: 'custodian_release', createdAt: new Date().toISOString() })
+      const withdrawal = await releaseOfferFunds(store, offer)
       await writeStore(store)
       sendJson(response, 200, { offer: publicOffer(offer, { custodianSession }), paymentHash: withdrawal.blockHash })
     } catch (error) {
@@ -2121,33 +2125,42 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     const offerId = decodeURIComponent(confirmPaymentMatch[1])
     const body = await readJsonBody(request)
     const clientSessionId = normalizeClientSessionId(body.clientSessionId)
-    const store = await readStore()
-    const offer = store.offers.find((item) => item.id === offerId)
+    await withOfferLock(offerId, async () => {
+      const store = await readStore()
+      const offer = store.offers.find((item) => item.id === offerId)
 
-    if (!offer) {
-      sendJson(response, 404, { error: 'La oferta no existe.' })
-      return
-    }
+      if (!offer) {
+        sendJson(response, 404, { error: 'La oferta no existe.' })
+        return
+      }
 
-    if (offer.status !== 'NEGOTIATION') {
-      sendJson(response, 409, { error: 'Esta oferta ya no esta en negociacion.' })
-      return
-    }
+      if (offer.status !== 'NEGOTIATION' && offer.status !== 'RELEASING') {
+        sendJson(response, 409, { error: 'Esta oferta ya no esta en negociacion.' })
+        return
+      }
 
-    if (!offer.sellerSessionId || offer.sellerSessionId !== clientSessionId) {
-      sendJson(response, 403, { error: 'Solo la sesion vendedora que publico la oferta puede confirmar el pago.' })
-      return
-    }
+      if (!offer.sellerSessionId || offer.sellerSessionId !== clientSessionId) {
+        sendJson(response, 403, { error: 'Solo la sesion vendedora que publico la oferta puede confirmar el pago.' })
+        return
+      }
 
-    if (!offer.paymentHash) {
-      sendJson(response, 409, { error: 'Primero confirma el deposito Nano en custodia.' })
-      return
-    }
+      if (!offer.paymentHash) {
+        sendJson(response, 409, { error: 'Primero confirma el deposito Nano en custodia.' })
+        return
+      }
 
-    offer.status = 'RELEASING'
-    offer.releaseRequestedAt = new Date().toISOString()
-    await writeStore(store)
-    sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId }) })
+      offer.status = 'RELEASING'
+      offer.releaseRequestedAt = new Date().toISOString()
+      try {
+        const withdrawal = await releaseOfferFunds(store, offer)
+        await writeStore(store)
+        sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId }), paymentHash: withdrawal.blockHash })
+      } catch (error) {
+        await writeStore(store)
+        const message = error instanceof Error ? error.message : 'No se pudo liberar los fondos al comprador.'
+        sendJson(response, 422, { error: `${message} Se intento varias veces; vuelve a confirmar para reintentar.` })
+      }
+    })
     return
   }
 
