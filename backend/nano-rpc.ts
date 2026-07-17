@@ -465,6 +465,7 @@ async function sendFromPrivateKeyStateless({
 
   for (const [hash, entry] of getReceivableEntries(receivable)) {
     if (!isNanoHash(hash) || !entry.amount) continue
+    const subtype = frontier ? 'receive' : 'open'
     const nextBalanceRaw = (balanceRaw + BigInt(entry.amount)).toString()
     const work = await getWork(frontier ?? publicKey)
     const receive = nanocurrency.createBlock(privateKey, {
@@ -474,7 +475,7 @@ async function sendFromPrivateKeyStateless({
       previous: frontier,
       link: normalizeNanoHash(hash),
     })
-    const receivedHash = await processStateBlock(receive.block, 'receive')
+    const receivedHash = await processStateBlock(receive.block, subtype)
     receivedBlocks.push(receivedHash)
     frontier = receivedHash
     balanceRaw = BigInt(nextBalanceRaw)
@@ -559,7 +560,7 @@ async function getWork(hashOrPublicKey: string) {
   return work
 }
 
-async function processStateBlock(block: Record<string, string>, subtype: 'receive' | 'send') {
+async function processStateBlock(block: Record<string, string>, subtype: 'open' | 'receive' | 'send') {
   const data = await nanoRpc({
     action: 'process',
     json_block: 'true',
