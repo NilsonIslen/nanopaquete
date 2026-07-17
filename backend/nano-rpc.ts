@@ -3,6 +3,7 @@ import * as nanocurrency from 'nanocurrency'
 const RAW_PER_NANO = 10n ** 30n
 const RPC_TIMEOUT_MS = Number(process.env.NANO_RPC_TIMEOUT_MS ?? 8000)
 const DEFAULT_NANO_RPC_URL = 'http://127.0.0.1:7076'
+const DEFAULT_NANO_WORK_URL = 'https://rainstorm.city/api'
 const NANO_RECEIVE_WORK_THRESHOLD = 'fffffe0000000000'
 const NANO_SEND_WORK_THRESHOLD = 'fffffff800000000'
 const rpcCooldowns = new Map<string, number>()
@@ -547,13 +548,15 @@ async function getAccountInfo(account: string) {
 
 async function getWork(hashOrPublicKey: string, threshold: string) {
   try {
-    const data = await nanoRpc({
-      action: 'work_generate',
-      hash: hashOrPublicKey,
-      difficulty: threshold,
-    })
-    const work = String(data.work ?? '')
-    if (nanocurrency.validateWork({ blockHash: hashOrPublicKey, work, threshold })) return work
+    const rpcWork = await requestWork(hashOrPublicKey, threshold, getNanoRpcUrls())
+    if (rpcWork) return rpcWork
+  } catch {
+    // Fall through to dedicated work servers.
+  }
+
+  try {
+    const externalWork = await requestWork(hashOrPublicKey, threshold, getNanoWorkUrls())
+    if (externalWork) return externalWork
   } catch {
     // Fall through to local work generation.
   }
@@ -561,6 +564,24 @@ async function getWork(hashOrPublicKey: string, threshold: string) {
   const work = await nanocurrency.computeWork(hashOrPublicKey, { workThreshold: threshold })
   if (!work) throw new Error('No se pudo generar work para publicar la transferencia Nano.')
   return work
+}
+
+async function requestWork(hashOrPublicKey: string, threshold: string, urls: string[]) {
+  for (const url of urls) {
+    try {
+      const data = await requestNanoRpc(url, {
+        action: 'work_generate',
+        hash: hashOrPublicKey,
+        difficulty: threshold,
+      })
+      const work = String(data.work ?? '')
+      if (nanocurrency.validateWork({ blockHash: hashOrPublicKey, work, threshold })) return work
+    } catch {
+      // Try the next work source.
+    }
+  }
+
+  return null
 }
 
 async function processStateBlock(block: Record<string, string>, subtype: 'open' | 'receive' | 'send') {
@@ -712,6 +733,15 @@ function getNanoRpcUrls() {
       .map((url) => url.trim())
       .filter(Boolean),
   ]
+}
+
+function getNanoWorkUrls() {
+  const configured = (process.env.NANO_WORK_URLS ?? DEFAULT_NANO_WORK_URL)
+    .split(',')
+    .map((url) => url.trim())
+    .filter(Boolean)
+
+  return configured.length ? configured : [DEFAULT_NANO_WORK_URL]
 }
 
 function normalizeBlockInfo(block: Record<string, unknown>) {
