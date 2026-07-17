@@ -105,7 +105,7 @@ type OfferRecord = {
 
 type UsedPayment = {
   hash: string
-  purpose: 'seller_deposit' | 'release_fee' | 'custodian_release' | 'custodian_auth'
+  purpose: 'seller_deposit' | 'release_fee' | 'custodian_release' | 'custodian_auth' | 'cancellation_refund'
   createdAt: string
 }
 
@@ -278,6 +278,7 @@ const nanoAccountSecret = process.env.NANOPAQUETE_ACCOUNT_SECRET ?? adminPasswor
 const nanoWalletId = process.env.NANO_WALLET_ID ?? ''
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const storePath = join(__dirname, 'data', 'nanopaquete.json')
+const offerOperationLocks = new Map<string, Promise<void>>()
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': process.env.NANOPAQUETE_ALLOWED_ORIGIN ?? '*',
@@ -448,6 +449,46 @@ const writeStore = async (store: Store) => {
   await writeFile(storePath, `${JSON.stringify({ ...store, custodians: sanitizeCustodians(store.custodians), nanoAccounts: normalizeNanoAccounts(store.nanoAccounts) }, null, 2)}\n`)
 }
 
+const withOfferLock = async <T>(offerId: string, operation: () => Promise<T>) => {
+  const previous = offerOperationLocks.get(offerId) ?? Promise.resolve()
+  let release = () => undefined
+  const current = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const queued = previous.catch(() => undefined).then(() => current)
+  offerOperationLocks.set(offerId, queued)
+
+  await previous.catch(() => undefined)
+
+  try {
+    return await operation()
+  } finally {
+    release()
+    if (offerOperationLocks.get(offerId) === queued) offerOperationLocks.delete(offerId)
+  }
+}
+
+const wait = (milliseconds: number) => new Promise((resolve) => setTimeout(resolve, milliseconds))
+
+const sendFromTemporaryAccountWithRetry = async (
+  options: Parameters<typeof sendFromPrivateKey>[0],
+  retries = 3,
+  delayMs = 2500,
+) => {
+  let lastError: unknown
+
+  for (let attempt = 1; attempt <= retries; attempt += 1) {
+    try {
+      return await sendFromPrivateKey(options)
+    } catch (error) {
+      lastError = error
+      if (attempt < retries) await wait(delayMs)
+    }
+  }
+
+  throw lastError
+}
+
 const normalizeText = (value: unknown) => String(value ?? '').trim()
 const normalizeClientSessionId = (value: unknown) =>
   normalizeText(value).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80)
@@ -535,6 +576,59 @@ const releaseUnusedEscrowAccount = (store: Store, offer: OfferRecord) => {
   offer.escrowNanoAddress = undefined
 }
 
+const refundDetectedDepositBeforeCancel = async (store: Store, offer: OfferRecord) => {
+  const escrowAccount = getOfferEscrowAccount(store, offer)
+  if (!escrowAccount) return undefined
+
+  const activeIntent = store.releaseFeeIntents.find(
+    (intent) =>
+      intent.offerId === offer.id &&
+      intent.status === 'PENDING' &&
+      intent.receiverAddress === escrowAccount.account,
+  )
+
+  if (!activeIntent) return undefined
+
+  let payment: Awaited<ReturnType<typeof findIncomingPaymentByAmount>>
+  try {
+    payment = await findIncomingPaymentByAmount({
+      receiverWallet: activeIntent.receiverAddress,
+      amountNano: activeIntent.amountXno,
+      createdAfter: activeIntent.createdAt,
+      excludedHashes: store.usedPayments.map((item) => item.hash),
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : ''
+    if (!message.includes('No encontre') && !message.includes('aun no aparece')) throw error
+    return undefined
+  }
+
+  if (!nanoWalletId) {
+    throw new Error('Se detecto un deposito al cancelar, pero falta configurar NANO_WALLET_ID para devolverlo.')
+  }
+
+  const refund = await sendFromPrivateKey({
+    walletId: nanoWalletId,
+    privateKey: decryptSecret(escrowAccount.encryptedPrivateKey),
+    sourceAccount: escrowAccount.account,
+    destinationAccount: payment.senderWallet,
+    amountNano: payment.amountNano,
+  })
+
+  activeIntent.status = 'EXPIRED'
+  activeIntent.paymentHash = payment.hash
+  activeIntent.senderWallet = payment.senderWallet
+  store.usedPayments.push({ hash: payment.hash, purpose: 'seller_deposit', createdAt: new Date().toISOString() })
+  store.usedPayments.push({ hash: refund.blockHash, purpose: 'cancellation_refund', createdAt: new Date().toISOString() })
+  escrowAccount.notes = [
+    escrowAccount.notes,
+    `Deposito ${payment.hash} devuelto por cancelacion inmediata a ${payment.senderWallet}. Retiro: ${refund.blockHash}.`,
+  ].filter(Boolean).join('\n')
+  escrowAccount.updatedAt = new Date().toISOString()
+
+  return refund.blockHash
+}
+
 const getValidCustodianSession = (store: Store, sessionId: string) => {
   const normalized = normalizeClientSessionId(sessionId)
   if (!normalized) return undefined
@@ -576,6 +670,12 @@ const publicOffer = (offer: OfferRecord, context: { clientSessionId?: string; cu
   const isBuyPublisher = Boolean(offerType === 'BUY' && context.clientSessionId && offer.buyerSessionId === context.clientSessionId)
   const isPublisher = isSellPublisher || isBuyPublisher
   const isNanoSeller = Boolean(context.clientSessionId && offer.sellerSessionId && offer.sellerSessionId === context.clientSessionId)
+  const isTaker = Boolean(
+    context.clientSessionId &&
+    (offerType === 'BUY'
+      ? offer.sellerSessionId === context.clientSessionId
+      : offer.buyerSessionId === context.clientSessionId),
+  )
   const isCustodian = Boolean(context.custodianSession && context.custodianSession.custodianId === offer.custodianId)
 
   return {
@@ -592,6 +692,7 @@ const publicOffer = (offer: OfferRecord, context: { clientSessionId?: string; cu
     canDeleteOffer: isPublisher && offer.status === 'ACTIVE',
     canDepositNano: isNanoSeller && offer.status === 'NEGOTIATION' && !offer.paymentHash,
     canConfirmPayment: isNanoSeller && offer.status === 'NEGOTIATION' && Boolean(offer.paymentHash),
+    canCancelTake: (isPublisher || isTaker) && offer.status === 'NEGOTIATION' && !offer.paymentHash,
     canCustodianReleaseOffer: isCustodian && canCustodianReleaseTakenOffer(offer),
     canCustodianReleaseFunds: isCustodian && offer.status === 'RELEASING',
     sellerDepositConfirmed: Boolean(offer.paymentHash),
@@ -1674,35 +1775,49 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     const offerId = decodeURIComponent(cancelTakeMatch[1])
     const body = await readJsonBody(request)
     const clientSessionId = normalizeClientSessionId(body.clientSessionId)
-    const store = await readStore()
-    const offer = store.offers.find((item) => item.id === offerId)
+    await withOfferLock(offerId, async () => {
+      const store = await readStore()
+      const offer = store.offers.find((item) => item.id === offerId)
 
-    if (!offer) {
-      sendJson(response, 404, { error: 'La oferta no existe.' })
-      return
-    }
+      if (!offer) {
+        sendJson(response, 404, { error: 'La oferta no existe.' })
+        return
+      }
 
-    if (offer.status !== 'NEGOTIATION') {
-      sendJson(response, 409, { error: 'Esta oferta no esta en negociacion.' })
-      return
-    }
+      if (offer.status !== 'NEGOTIATION') {
+        sendJson(response, 409, { error: 'Esta oferta no esta en negociacion.' })
+        return
+      }
 
-    const takerSessionId = (offer.offerType ?? 'SELL') === 'BUY' ? offer.sellerSessionId : offer.buyerSessionId
-    if (takerSessionId && takerSessionId !== clientSessionId) {
-      sendJson(response, 403, { error: 'Solo la sesion que tomo la oferta puede cancelar este proceso.' })
-      return
-    }
+      const offerType = offer.offerType ?? 'SELL'
+      const publisherSessionId = offerType === 'BUY' ? offer.buyerSessionId : offer.sellerSessionId
+      const takerSessionId = offerType === 'BUY' ? offer.sellerSessionId : offer.buyerSessionId
+      const canCancel = Boolean(clientSessionId && (publisherSessionId === clientSessionId || takerSessionId === clientSessionId))
 
-    if (offer.paymentHash) {
-      sendJson(response, 409, { error: 'La oferta ya tiene deposito Nano confirmado y no puede volver a activa.' })
-      return
-    }
+      if (!canCancel) {
+        sendJson(response, 403, { error: 'Solo el comprador o vendedor de esta negociacion pueden cancelar este proceso.' })
+        return
+      }
 
-    releaseUnusedEscrowAccount(store, offer)
-    releaseTakenOffer(offer)
-    await writeStore(store)
+      if (offer.paymentHash) {
+        sendJson(response, 409, { error: 'La oferta ya tiene deposito Nano confirmado y no puede volver a activa.' })
+        return
+      }
 
-    sendJson(response, 200, { offer: publicOffer(offer) })
+      let refundHash: string | undefined
+      try {
+        refundHash = await refundDetectedDepositBeforeCancel(store, offer)
+      } catch (error) {
+        sendJson(response, 409, { error: error instanceof Error ? error.message : 'Se detecto un deposito y no se pudo devolver automaticamente.' })
+        return
+      }
+
+      releaseUnusedEscrowAccount(store, offer)
+      releaseTakenOffer(offer)
+      await writeStore(store)
+
+      sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId }), refundHash })
+    })
     return
   }
 
@@ -1872,7 +1987,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     }
 
     try {
-      const withdrawal = await sendFromPrivateKey({
+      const withdrawal = await sendFromTemporaryAccountWithRetry({
         walletId: nanoWalletId,
         privateKey: decryptSecret(escrowAccount.encryptedPrivateKey),
         sourceAccount: escrowAccount.account,
@@ -1895,7 +2010,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     } catch (error) {
       const message = error instanceof Error ? error.message : 'No se pudo validar la liberacion del custodio.'
       sendJson(response, 422, {
-        error: message.replace('wallet vendedora', 'wallet de custodia'),
+        error: `${message.replace('wallet vendedora', 'wallet de custodia')} Se intento liberar automaticamente varias veces; vuelve a verificar para reintentar.`,
       })
     }
     return
@@ -1907,72 +2022,82 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     const intentId = decodeURIComponent(verifyReleaseIntentMatch[1])
     const body = await readJsonBody(request)
     const clientSessionId = normalizeClientSessionId(body.clientSessionId)
-    const store = await readStore()
-    const intent = store.releaseFeeIntents.find((item) => item.id === intentId)
+    const initialStore = await readStore()
+    const initialIntent = initialStore.releaseFeeIntents.find((item) => item.id === intentId)
 
-    if (!intent) {
+    if (!initialIntent) {
       sendJson(response, 404, { error: 'Solicitud de liberacion no encontrada.' })
       return
     }
 
-    const offer = store.offers.find((item) => item.id === intent.offerId)
+    await withOfferLock(initialIntent.offerId, async () => {
+      const store = await readStore()
+      const intent = store.releaseFeeIntents.find((item) => item.id === intentId)
 
-    if (!offer) {
-      sendJson(response, 404, { error: 'La oferta no existe.' })
-      return
-    }
+      if (!intent) {
+        sendJson(response, 404, { error: 'Solicitud de liberacion no encontrada.' })
+        return
+      }
 
-    if (offer.paymentHash) {
-      sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId }), paymentHash: offer.paymentHash })
-      return
-    }
+      const offer = store.offers.find((item) => item.id === intent.offerId)
 
-    if (offer.status !== 'NEGOTIATION') {
-      sendJson(response, 409, { error: 'Esta oferta ya no esta en negociacion.' })
-      return
-    }
+      if (!offer) {
+        sendJson(response, 404, { error: 'La oferta no existe.' })
+        return
+      }
 
-    if (!offer.sellerSessionId || offer.sellerSessionId !== clientSessionId) {
-      sendJson(response, 403, { error: 'Solo la sesion vendedora que publico la oferta puede confirmar el pago.' })
-      return
-    }
+      if (offer.paymentHash) {
+        sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId }), paymentHash: offer.paymentHash })
+        return
+      }
 
-    const escrowAccount = await assignEscrowAccountToOffer(store, offer)
-    if (intent.receiverAddress !== escrowAccount.account) {
-      intent.status = 'EXPIRED'
-      await writeStore(store)
-      sendJson(response, 409, { error: 'Esta solicitud de deposito ya no corresponde a la cuenta temporal de la negociacion. Inicia una nueva.' })
-      return
-    }
+      if (offer.status !== 'NEGOTIATION') {
+        sendJson(response, 409, { error: 'Esta oferta ya no esta en negociacion.' })
+        return
+      }
 
-    if (new Date(intent.expiresAt).getTime() <= Date.now()) {
-      intent.status = 'EXPIRED'
-      await writeStore(store)
-      sendJson(response, 410, { error: 'La solicitud de liberacion vencio. Inicia una nueva.' })
-      return
-    }
+      if (!offer.sellerSessionId || offer.sellerSessionId !== clientSessionId) {
+        sendJson(response, 403, { error: 'Solo la sesion vendedora que publico la oferta puede confirmar el pago.' })
+        return
+      }
 
-    try {
-      const payment = await findIncomingPaymentByAmount({
-        receiverWallet: intent.receiverAddress,
-        amountNano: intent.amountXno,
-        createdAfter: intent.createdAt,
-        excludedHashes: store.usedPayments.map((item) => item.hash),
-      })
+      const escrowAccount = await assignEscrowAccountToOffer(store, offer)
+      if (intent.receiverAddress !== escrowAccount.account) {
+        intent.status = 'EXPIRED'
+        await writeStore(store)
+        sendJson(response, 409, { error: 'Esta solicitud de deposito ya no corresponde a la cuenta temporal de la negociacion. Inicia una nueva.' })
+        return
+      }
 
-      intent.status = 'VERIFIED'
-      intent.paymentHash = payment.hash
-      intent.senderWallet = payment.senderWallet
-      offer.sellerWallet = payment.senderWallet
-      offer.paymentHash = payment.hash
-      store.usedPayments.push({ hash: payment.hash, purpose: 'seller_deposit', createdAt: new Date().toISOString() })
-      await writeStore(store)
-      sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId }), paymentHash: payment.hash })
-    } catch (error) {
-      sendJson(response, 422, {
-        error: error instanceof Error ? error.message : 'No se pudo validar el deposito.',
-      })
-    }
+      if (new Date(intent.expiresAt).getTime() <= Date.now()) {
+        intent.status = 'EXPIRED'
+        await writeStore(store)
+        sendJson(response, 410, { error: 'La solicitud de liberacion vencio. Inicia una nueva.' })
+        return
+      }
+
+      try {
+        const payment = await findIncomingPaymentByAmount({
+          receiverWallet: intent.receiverAddress,
+          amountNano: intent.amountXno,
+          createdAfter: intent.createdAt,
+          excludedHashes: store.usedPayments.map((item) => item.hash),
+        })
+
+        intent.status = 'VERIFIED'
+        intent.paymentHash = payment.hash
+        intent.senderWallet = payment.senderWallet
+        offer.sellerWallet = payment.senderWallet
+        offer.paymentHash = payment.hash
+        store.usedPayments.push({ hash: payment.hash, purpose: 'seller_deposit', createdAt: new Date().toISOString() })
+        await writeStore(store)
+        sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId }), paymentHash: payment.hash })
+      } catch (error) {
+        sendJson(response, 422, {
+          error: error instanceof Error ? error.message : 'No se pudo validar el deposito.',
+        })
+      }
+    })
     return
   }
 

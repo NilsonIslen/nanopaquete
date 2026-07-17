@@ -65,6 +65,7 @@ export type PublicOffer = {
   canDeleteOffer?: boolean
   canDepositNano?: boolean
   canConfirmPayment?: boolean
+  canCancelTake?: boolean
   canCustodianReleaseOffer?: boolean
   canCustodianReleaseFunds?: boolean
   sellerDepositConfirmed?: boolean

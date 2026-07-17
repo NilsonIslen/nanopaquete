@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, CheckCircle2, Copy, Download, Menu, ShieldCheck, Wallet, X } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import {
@@ -293,8 +293,10 @@ export function Nanopaquete() {
   const [activeView, setActiveView] = useState<AppView>(getInitialView)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [clientSessionId] = useState(getClientSessionId)
+  const autoStartedDepositOffers = useRef(new Set<string>())
   const visibleOffers = takenOffer ? [takenOffer.offer] : sortOffers(offers, Boolean(custodianSession))
   const offerGroups = groupOffers(visibleOffers)
+  const pendingDepositOfferId = visibleOffers.find((offer) => offer.canDepositNano)?.id
   const donationCustodian = custodians.find((custodian) => custodian.isLeader && custodian.wallet) ?? custodians.find((custodian) => custodian.wallet)
   const donationWallet = donationCustodian?.wallet ?? ''
   const donationPaymentUri = donationWallet ? `nano:${donationWallet}` : ''
@@ -380,6 +382,45 @@ export function Nanopaquete() {
 
     return () => window.clearInterval(interval)
   }, [clientSessionId, takenOfferId])
+
+  useEffect(() => {
+    if (takenOfferId || activeView !== 'offers') return undefined
+
+    const interval = window.setInterval(() => {
+      getOffers(clientSessionId, custodianSession?.sessionId)
+        .then((response) => setOffers(response.offers))
+        .catch(() => undefined)
+    }, 10000)
+
+    return () => window.clearInterval(interval)
+  }, [activeView, clientSessionId, custodianSession?.sessionId, takenOfferId])
+
+  useEffect(() => {
+    if (!pendingDepositOfferId) return undefined
+    if (releaseFeeIntent?.offerId === pendingDepositOfferId) return undefined
+    if (autoStartedDepositOffers.current.has(pendingDepositOfferId)) return undefined
+
+    let ignore = false
+    const loadingKey = `release-start:${pendingDepositOfferId}`
+    autoStartedDepositOffers.current.add(pendingDepositOfferId)
+    setError(null)
+    setLoading(loadingKey)
+
+    startReleaseFee(pendingDepositOfferId, clientSessionId)
+      .then((intent) => {
+        if (!ignore) setReleaseFeeIntent(intent)
+      })
+      .catch((requestError) => {
+        if (!ignore) setError(requestError instanceof Error ? requestError.message : 'No se pudo preparar el deposito.')
+      })
+      .finally(() => {
+        if (!ignore) setLoading((current) => (current === loadingKey ? null : current))
+      })
+
+    return () => {
+      ignore = true
+    }
+  }, [clientSessionId, pendingDepositOfferId, releaseFeeIntent?.offerId])
 
   useEffect(() => {
     if (takenOffer) {
@@ -749,14 +790,15 @@ export function Nanopaquete() {
     }
   }
 
-  const handleCancelTakenOffer = async () => {
-    if (!takenOffer) return
+  const handleCancelTakenOffer = async (offerId = takenOffer?.offer.id) => {
+    if (!offerId) return
     setError(null)
-    setLoading('cancel-take')
+    setLoading(`cancel-take:${offerId}`)
 
     try {
-      await cancelTakenOffer(takenOffer.offer.id, clientSessionId)
-      setTakenOffer(null)
+      await cancelTakenOffer(offerId, clientSessionId)
+      if (takenOffer?.offer.id === offerId) setTakenOffer(null)
+      if (releaseFeeIntent?.offerId === offerId) setReleaseFeeIntent(null)
       await loadOffers()
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'No se pudo cancelar el proceso.')
@@ -1104,7 +1146,7 @@ export function Nanopaquete() {
                 </select>
               </label>
               <label>
-                Precio total del paquete
+                Cantidad del activo
                 <input
                   placeholder="Ej. 180000"
                   value={sellerForm.price}
@@ -1289,13 +1331,13 @@ export function Nanopaquete() {
                       </div>
                     </form>
                   )}
-                  {offer.canDepositNano && (
+                  {offer.canDepositNano && releaseFeeIntent?.offerId !== offer.id && (
                     <button
                       type="button"
                       onClick={() => void handleStartReleaseFee(offer.id)}
                       disabled={loading === `release-start:${offer.id}`}
                     >
-                      Depositar Nano
+                      {loading === `release-start:${offer.id}` ? 'Generando QR...' : 'Depositar Nano'}
                     </button>
                   )}
                   {offer.canConfirmPayment && (
@@ -1307,10 +1349,20 @@ export function Nanopaquete() {
                       Confirmar pago recibido
                     </button>
                   )}
+                  {offer.canCancelTake && !takenOffer && (
+                    <button
+                      className="ghost-button danger-button"
+                      type="button"
+                      onClick={() => void handleCancelTakenOffer(offer.id)}
+                      disabled={loading === `cancel-take:${offer.id}`}
+                    >
+                      Cancelar proceso
+                    </button>
+                  )}
                   {releaseFeeIntent?.offerId === offer.id && (
                     <div className="private-box release-fee-box inline-release-fee-box">
                       <p className="eyebrow">Deposito de Nano</p>
-                      <h3>Deposita {releaseFeeIntent.amountXno} XNO en la custodia.</h3>
+                      <h3>Deposita {releaseFeeIntent.amountXno} XNO en la cuenta temporal.</h3>
                       <p>Cuando la app detecte esa transferencia, se mostraran los datos de contacto para continuar la negociacion.</p>
                       <div className="payment-actions">
                         <button className="primary-button" type="button" onClick={() => openNanoPayment(releaseFeeIntent.paymentUri)}>
@@ -1345,7 +1397,7 @@ export function Nanopaquete() {
                       <p className="eyebrow">Alguien tomó tu oferta</p>
                       <p>
                         {offer.canDepositNano
-                          ? 'Deposita los XNO para ver los datos de contacto y continuar la negociación.'
+                          ? 'Deposita los XNO en la cuenta temporal. El QR de depósito aparece en esta tarjeta.'
                           : 'Espera la confirmación del depósito Nano para ver los datos de contacto y continuar la negociación.'}
                       </p>
                     </div>
@@ -1534,12 +1586,12 @@ export function Nanopaquete() {
                 <dt>Oferta tomada</dt>
                 <dd>{takenOffer.offer.amountXno} XNO por {takenOffer.offer.price} {takenOffer.offer.currency}</dd>
               </dl>
-              {takenOffer.offer.status === 'NEGOTIATION' && !takenOffer.offer.sellerDepositConfirmed && (
+              {takenOffer.offer.canCancelTake && (
                 <button
                   className="ghost-button danger-button"
                   type="button"
-                  onClick={handleCancelTakenOffer}
-                  disabled={loading === 'cancel-take'}
+                  onClick={() => void handleCancelTakenOffer()}
+                  disabled={loading === `cancel-take:${takenOffer.offer.id}`}
                 >
                   Cancelar proceso
                 </button>
