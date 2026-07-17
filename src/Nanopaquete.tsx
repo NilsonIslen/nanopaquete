@@ -1043,7 +1043,7 @@ export function Nanopaquete() {
             <p>El vendedor deposita la cantidad de XNO de la oferta más el 0,2% de comisión de plataforma. Cuando el depósito queda confirmado, Nanopaquete notifica al comprador y muestra los números de contacto para que ambas partes acuerden el pago.</p>
             <p>Cuando el comprador paga, el vendedor confirma la recepción del pago y Nanopaquete libera los XNO a la cuenta Nano registrada por el comprador.</p>
             <h3>Posibles disputas</h3>
-            <p>Si aparece una disputa durante una negociación, conserva los comprobantes y contacta al administrador de Nanopaquete al 3008188284.</p>
+            <p>Si aparece una disputa durante una negociación, conserva los comprobantes y contacta al administrador de Nanopaquete por Telegram: @nililen, o al número +57 3008188284.</p>
             <div className="guide-disputes">
               <p><strong>Una parte no responde:</strong> la otra parte debe conservar comprobantes y solicitar revisión al administrador.</p>
               <p><strong>El pago externo no se confirma:</strong> los XNO permanecen en custodia hasta que exista una confirmación suficiente o una decisión administrativa.</p>

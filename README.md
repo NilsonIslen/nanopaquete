@@ -33,7 +33,7 @@ La plataforma no persigue el precio del mercado. Cada usuario define cuanta cant
 
 ## Disputas
 
-Si aparece una disputa durante una negociacion, las partes deben conservar comprobantes y contactar al administrador de Nanopaquete al 3008188284.
+Si aparece una disputa durante una negociacion, las partes deben conservar comprobantes y contactar al administrador de Nanopaquete por Telegram: @nililen, o al numero +57 3008188284.
 
 ## Comandos
 
