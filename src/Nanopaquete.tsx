@@ -5,11 +5,13 @@ import {
   addManagedCustodian,
   cancelTakenOffer,
   confirmSellerPayment,
+  deleteOffer,
   deleteManagedCustodian,
   getManagedCustodians,
   getBuyerNegotiation,
   getCustodians,
   getOffers,
+  logoutCustodianAuth,
   publishBuyOffer,
   publishOffer,
   releaseExpiredTakenOffer,
@@ -258,6 +260,11 @@ const groupOffers = (offers: PublicOffer[]): OfferGroup[] => {
     .sort((left, right) => right.offers.length - left.offers.length || left.title.localeCompare(right.title, 'es'))
 }
 
+const getInitialView = (): AppView => {
+  const params = new URLSearchParams(window.location.search)
+  return params.get('admin') === '1' || window.location.hash === '#admin' ? 'custodian-auth' : 'offers'
+}
+
 export function Nanopaquete() {
   const [sellerForm, setSellerForm] = useState(initialSellerForm)
   const [buyOfferForm, setBuyOfferForm] = useState(initialBuyOfferForm)
@@ -278,7 +285,7 @@ export function Nanopaquete() {
   const [editingPrice, setEditingPrice] = useState('')
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [activeView, setActiveView] = useState<AppView>('offers')
+  const [activeView, setActiveView] = useState<AppView>(getInitialView)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [clientSessionId] = useState(getClientSessionId)
   const visibleOffers = takenOffer ? [takenOffer.offer] : sortOffers(offers, Boolean(custodianSession))
@@ -546,7 +553,7 @@ export function Nanopaquete() {
 
     try {
       const response = await takeOffer(selectedOffer.id, {
-        buyerNanoAddress: buyerForm.nanoAddress,
+        buyerNanoAddress: selectedOffer.offerType === 'SELL' ? buyerForm.nanoAddress : undefined,
         buyerCountry: buyerForm.country,
         buyerDialCode: buyerForm.dialCode,
         buyerContact: buyerForm.contact,
@@ -566,6 +573,21 @@ export function Nanopaquete() {
   const handleStartEditPrice = (offer: PublicOffer) => {
     setEditingPriceOfferId(offer.id)
     setEditingPrice(offer.price)
+  }
+
+  const handleDeleteOffer = async (offerId: string) => {
+    setError(null)
+    setLoading(`offer-delete:${offerId}`)
+
+    try {
+      await deleteOffer(offerId, clientSessionId)
+      setOffers((currentOffers) => currentOffers.filter((offer) => offer.id !== offerId))
+      if (selectedOffer?.id === offerId) setSelectedOffer(null)
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'No se pudo eliminar la oferta.')
+    } finally {
+      setLoading(null)
+    }
   }
 
   const handleUpdateOfferPrice = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -704,6 +726,7 @@ export function Nanopaquete() {
   }
 
   const handleCloseCustodianSession = async () => {
+    const sessionId = custodianSession?.sessionId
     setCustodianSession(null)
     setCustodianAuthIntent(null)
     setManagedCustodians([])
@@ -713,6 +736,7 @@ export function Nanopaquete() {
     setError(null)
 
     try {
+      if (sessionId) await logoutCustodianAuth(sessionId)
       const response = await getOffers(clientSessionId)
       setOffers(response.offers)
     } catch (requestError) {
@@ -783,6 +807,19 @@ export function Nanopaquete() {
             <p>Acceso solo para cuentas autorizadas.</p>
             {custodianSession ? (
               <>
+                <div className="private-box custodian-admin-box">
+                  <div className="panel-heading">
+                    <h3>Administrador</h3>
+                  </div>
+                  <div className="button-row">
+                    <a className="wallet-download-link standalone-link" href="/admin/offers">
+                      Ofertas
+                    </a>
+                    <a className="wallet-download-link standalone-link" href="/admin/nano-accounts">
+                      Cuentas Nano
+                    </a>
+                  </div>
+                </div>
                 {!!managedCustodians.length && (
                   <div className="private-box custodian-admin-box">
                     <div className="panel-heading">
@@ -1200,16 +1237,27 @@ export function Nanopaquete() {
                   return (
                     <article className={`${isSelected ? 'offer-card selected-offer-card' : 'offer-card'} ${offer.offerType === 'BUY' ? 'buy-offer-card' : 'sell-offer-card'}`} key={offer.id}>
                   <div>
-                    <span className="offer-kind-pill">{offer.offerType === 'BUY' ? 'Compra Nano' : 'Venta Nano'}</span>
                     <p className="offer-amount">{offer.amountXno} XNO</p>
                     <p>{offer.price} {offer.currency}</p>
                     <small>Estado: {offer.status === 'ACTIVE' ? 'Activa' : offer.status === 'NEGOTIATION' ? 'En negociacion' : 'Liberando'}</small>
                     <small>Publicada {shortDate(offer.createdAt)}</small>
                   </div>
                   {offer.canEditPrice && editingPriceOfferId !== offer.id && (
-                    <button type="button" onClick={() => handleStartEditPrice(offer)}>
-                      Editar precio
-                    </button>
+                    <div className="offer-owner-actions">
+                      <button type="button" onClick={() => handleStartEditPrice(offer)}>
+                        Editar precio
+                      </button>
+                      {offer.canDeleteOffer && (
+                        <button
+                          className="danger-button"
+                          type="button"
+                          onClick={() => void handleDeleteOffer(offer.id)}
+                          disabled={loading === `offer-delete:${offer.id}`}
+                        >
+                          Eliminar
+                        </button>
+                      )}
+                    </div>
                   )}
                   {offer.canEditPrice && editingPriceOfferId === offer.id && (
                     <form className="inline-price-form" onSubmit={handleUpdateOfferPrice}>
@@ -1283,14 +1331,21 @@ export function Nanopaquete() {
                       </button>
                     </div>
                   )}
-                  {offer.canConfirmPayment && offer.buyerContact && (
+                  {offer.status === 'NEGOTIATION' && offer.isOwnOffer && (
+                    (offer.offerType === 'SELL' && offer.buyerContact) ||
+                    (offer.offerType === 'BUY' && offer.sellerContact)
+                  ) && (
                     <div className="private-box seller-buyer-box">
-                      <p className="eyebrow">Comprador de esta oferta</p>
+                      <p className="eyebrow">Persona que tomo esta oferta</p>
                       <dl>
-                        <dt>Pais comprador</dt>
-                        <dd>{offer.buyerCountry || 'No informado'}</dd>
-                        <dt>Contacto comprador</dt>
-                        <dd>{offer.buyerDialCode ? offer.buyerDialCode + ' ' : ''}{offer.buyerContact}</dd>
+                        <dt>Pais</dt>
+                        <dd>{offer.offerType === 'BUY' ? offer.sellerCountry || 'No informado' : offer.buyerCountry || 'No informado'}</dd>
+                        <dt>Contacto</dt>
+                        <dd>
+                          {offer.offerType === 'BUY'
+                            ? `${offer.sellerDialCode ? offer.sellerDialCode + ' ' : ''}${offer.sellerContact}`
+                            : `${offer.buyerDialCode ? offer.buyerDialCode + ' ' : ''}${offer.buyerContact}`}
+                        </dd>
                       </dl>
                     </div>
                   )}
@@ -1320,21 +1375,17 @@ export function Nanopaquete() {
                       )}
                     </div>
                   )}
-                  {offer.status === 'RELEASING' && !offer.custodianReleaseUri && (
+                  {offer.status === 'RELEASING' && !offer.canCustodianReleaseFunds && (
                     <span className="offer-status-pill">Liberando</span>
                   )}
-                  {offer.status === 'RELEASING' && offer.custodianReleaseUri && (
+                  {offer.canCustodianReleaseFunds && (
                     <div className="private-box custodian-release-box">
                       <span className="offer-status-pill">Liberando</span>
                       <h3>Transferencia del custodio</h3>
-                      <p>Esta oferta ya fue confirmada por el vendedor. El custodio puede usar este enlace para liberar los fondos al comprador.</p>
+                      <p>Esta oferta ya fue confirmada por el vendedor. Nanopaquete enviara los fondos desde la cuenta temporal al comprador.</p>
                       <div className="payment-actions">
-                            <button className="primary-button" type="button" onClick={() => openNanoPayment(offer.custodianReleaseUri || '')}>
-                              <Wallet size={18} />
-                              Transferir al comprador
-                            </button>
                             <button
-                              className="ghost-button"
+                              className="primary-button"
                               type="button"
                               onClick={() => void handleVerifyCustodianRelease(offer.id)}
                               disabled={loading === `custodian-release:${offer.id}`}
@@ -1343,13 +1394,11 @@ export function Nanopaquete() {
                               {loading === `custodian-release:${offer.id}` ? 'Verificando...' : 'Verificar liberacion'}
                             </button>
                       </div>
-                      <div className="payment-qr" aria-label="QR para transferir al comprador">
-                        <QRCodeSVG value={offer.custodianReleaseUri} size={176} marginSize={2} />
-                      </div>
                     </div>
                   )}
-                  {!isSelected && offer.status === 'ACTIVE' && !offer.isOwnOffer && offer.offerType === 'SELL' && (
+                  {!isSelected && offer.status === 'ACTIVE' && !offer.isOwnOffer && (
                     <button
+                      className={offer.offerType === 'SELL' ? 'take-buy-button' : 'take-sell-button'}
                       type="button"
                       onClick={() => {
                         if (takenOffer) {
@@ -1359,28 +1408,27 @@ export function Nanopaquete() {
                         setSelectedOffer(offer)
                       }}
                     >
-                      Tomar oferta
+                      {offer.offerType === 'SELL' ? 'Comprar Nano' : 'Vender Nano'}
                     </button>
-                  )}
-                  {offer.status === 'ACTIVE' && !offer.isOwnOffer && offer.offerType === 'BUY' && (
-                    <span className="offer-status-pill">Compra publicada</span>
                   )}
                   {isSelected && (
                     <form className="take-form inline-take-form" onSubmit={handleTakeOffer}>
                       <div>
-                        <p className="eyebrow">Tomar oferta</p>
+                        <p className="eyebrow">{offer.offerType === 'SELL' ? 'Comprar Nano' : 'Vender Nano'}</p>
                         <h3>{offer.amountXno} XNO por {offer.price} {offer.currency}</h3>
                       </div>
-                      <label>
-                        Cuenta Nano donde recibirás los XNO
-                        <input
-                          placeholder="nano_..."
-                          value={buyerForm.nanoAddress}
-                          onChange={(event) => updateBuyerForm('nanoAddress', event.target.value)}
-                          required
-                          autoFocus
-                        />
-                      </label>
+                      {offer.offerType === 'SELL' && (
+                        <label>
+                          Cuenta Nano donde recibirás los XNO
+                          <input
+                            placeholder="nano_..."
+                            value={buyerForm.nanoAddress}
+                            onChange={(event) => updateBuyerForm('nanoAddress', event.target.value)}
+                            required
+                            autoFocus
+                          />
+                        </label>
+                      )}
                       <label>
                         Pais del contacto
                         <select
@@ -1447,10 +1495,14 @@ export function Nanopaquete() {
               <dl>
                 {takenOffer.offer.status === 'NEGOTIATION' && (
                   <>
-                    <dt>Pais vendedor</dt>
-                    <dd>{takenOffer.sellerCountry || 'No informado'}</dd>
-                    <dt>Contacto vendedor</dt>
-                    <dd>{takenOffer.sellerDialCode ? takenOffer.sellerDialCode + ' ' : ''}{takenOffer.sellerContact}</dd>
+                    <dt>{takenOffer.offer.offerType === 'BUY' ? 'Pais comprador' : 'Pais vendedor'}</dt>
+                    <dd>{takenOffer.offer.offerType === 'BUY' ? takenOffer.buyerCountry || 'No informado' : takenOffer.sellerCountry || 'No informado'}</dd>
+                    <dt>{takenOffer.offer.offerType === 'BUY' ? 'Contacto comprador' : 'Contacto vendedor'}</dt>
+                    <dd>
+                      {takenOffer.offer.offerType === 'BUY'
+                        ? `${takenOffer.buyerDialCode ? takenOffer.buyerDialCode + ' ' : ''}${takenOffer.buyerContact}`
+                        : `${takenOffer.sellerDialCode ? takenOffer.sellerDialCode + ' ' : ''}${takenOffer.sellerContact}`}
+                    </dd>
                   </>
                 )}
                 <dt>Contacto administrador</dt>

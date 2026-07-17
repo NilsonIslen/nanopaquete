@@ -52,13 +52,14 @@ npm run lint
 - `NANOPAQUETE_ESCROW_WALLET`: wallet Nano de custodia. Por defecto usa `nano_1j7csyciamkzktswyxey5yt6f1rg1zbw3rtioe7xdze4fekkbo7zxri3ijxd`.
 - `NANOPAQUETE_CUSTODIAN_CONTACT`: contacto privado para administracion de custodia. Por defecto usa `+573008188284`.
 - `NANOPAQUETE_ACCOUNT_SECRET`: secreto usado para cifrar las claves privadas de las cuentas Nano generadas por el backend. En produccion debe ser una cadena larga y privada.
-- `NANOPAQUETE_ADMIN_USER`: usuario admin, por defecto `admin`.
-- `NANOPAQUETE_ADMIN_PASSWORD`: clave admin, por defecto `nanopaquete`.
+- `NANOPAQUETE_ADMIN_PASSWORD`: clave usada solo como respaldo para derivar el cifrado si no se configura `NANOPAQUETE_ACCOUNT_SECRET`.
 - `NANO_RPC_URL`: nodo Nano RPC, por defecto `http://127.0.0.1:7076`.
 - `NANO_RPC_FALLBACK_URLS`: nodos RPC alternos separados por coma.
 - `NANO_WALLET_ID`: wallet local del nodo Nano usada para importar temporalmente las claves cifradas y retirar fondos desde las cuentas generadas. El nodo debe permitir comandos de control.
 
 ## Pagina privada
+
+`/?admin=1` abre el acceso privado. Para entrar se debe autenticar una cuenta Nano autorizada como custodio.
 
 `/admin/offers` permite revisar ofertas, negociaciones, contactos de las partes y estados operativos.
 

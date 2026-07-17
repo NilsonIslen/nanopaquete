@@ -61,9 +61,11 @@ export type PublicOffer = {
   createdAt: string
   isOwnOffer?: boolean
   canEditPrice?: boolean
+  canDeleteOffer?: boolean
   canDepositNano?: boolean
   canConfirmPayment?: boolean
   canCustodianReleaseOffer?: boolean
+  canCustodianReleaseFunds?: boolean
   sellerDepositConfirmed?: boolean
   sellerCountry?: string
   sellerDialCode?: string
@@ -71,7 +73,6 @@ export type PublicOffer = {
   buyerCountry?: string
   buyerDialCode?: string
   buyerContact?: string
-  custodianReleaseUri?: string
 }
 
 export type SellerPaymentIntent = {
@@ -128,7 +129,7 @@ export type PublishedOffer = {
 }
 
 export type TakeOfferPayload = {
-  buyerNanoAddress: string
+  buyerNanoAddress?: string
   buyerCountry: string
   buyerDialCode: string
   buyerContact: string
@@ -140,6 +141,9 @@ export type TakenOffer = {
   sellerContact: string
   sellerCountry?: string
   sellerDialCode?: string
+  buyerContact?: string
+  buyerCountry?: string
+  buyerDialCode?: string
   custodianContact: string
 }
 
@@ -241,6 +245,12 @@ export const updateOfferPrice = (offerId: string, payload: { price: string; clie
     body: JSON.stringify(payload),
   })
 
+export const deleteOffer = (offerId: string, clientSessionId: string) =>
+  requestJson<{ offer: PublicOffer }>(`/offers/${encodeURIComponent(offerId)}`, {
+    method: 'DELETE',
+    body: JSON.stringify({ clientSessionId }),
+  })
+
 export const takeOffer = (offerId: string, payload: TakeOfferPayload) =>
   requestJson<TakenOffer>(`/offers/${encodeURIComponent(offerId)}/take`, {
     method: 'POST',
@@ -287,6 +297,12 @@ export const verifyCustodianAuth = (intentId: string) =>
   requestJson<CustodianSession>(`/custodian-auth/${encodeURIComponent(intentId)}/verify`, {
     method: 'POST',
     body: JSON.stringify({}),
+  })
+
+export const logoutCustodianAuth = (custodianSessionId: string) =>
+  requestJson<{ ok: boolean }>('/custodian-auth/logout', {
+    method: 'POST',
+    body: JSON.stringify({ custodianSessionId }),
   })
 
 export const getManagedCustodians = (custodianSessionId: string) =>

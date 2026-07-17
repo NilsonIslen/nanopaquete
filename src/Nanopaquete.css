@@ -331,23 +331,6 @@ dd {
   border-left: 5px solid #2e7d4f;
 }
 
-.offer-kind-pill {
-  min-height: 28px;
-  display: inline-flex;
-  align-items: center;
-  width: fit-content;
-  border-radius: 999px;
-  padding: 0 10px;
-  font-size: 0.78rem;
-  font-weight: 900;
-  color: #ffffff;
-  background: #b23b32;
-}
-
-.buy-offer-card .offer-kind-pill {
-  background: #2e7d4f;
-}
-
 .offer-amount {
   font-size: 1.35rem;
   font-weight: 900;
@@ -363,6 +346,22 @@ dd {
   display: block;
   margin-top: 8px;
   color: #637064;
+}
+
+.offer-owner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.offer-card button.take-buy-button {
+  background: #2e7d4f;
+}
+
+.offer-card button.take-sell-button,
+.offer-card button.danger-button {
+  background: #b23b32;
 }
 
 .empty-state {

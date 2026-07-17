@@ -1,10 +1,10 @@
 import { createServer } from 'node:http'
 import type { IncomingMessage, ServerResponse } from 'node:http'
-import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
+import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { createNanoAccount, findAnyIncomingPayment, findIncomingPaymentByAmount, findIncomingPaymentBySenderAmount, isNanoAddress, nanoToRaw, sendFromPrivateKey } from './nano-rpc'
+import { createNanoAccount, findAnyIncomingPayment, findIncomingPaymentByAmount, isNanoAddress, nanoToRaw, sendFromPrivateKey } from './nano-rpc'
 
 const currencies = [
   'ARS',
@@ -74,6 +74,8 @@ type OfferRecord = {
   id: string
   offerType?: OfferType
   escrowId?: string
+  escrowNanoAccountId?: string
+  escrowNanoAddress?: string
   amountXno: string
   currency: Currency
   price: string
@@ -182,7 +184,6 @@ type Store = {
 }
 
 const port = Number(process.env.NANOPAQUETE_API_PORT ?? 8789)
-const adminUser = process.env.NANOPAQUETE_ADMIN_USER ?? 'admin'
 const adminPassword = process.env.NANOPAQUETE_ADMIN_PASSWORD ?? 'nanopaquete'
 type Custodian = {
   id: string
@@ -280,12 +281,12 @@ const storePath = join(__dirname, 'data', 'nanopaquete.json')
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': process.env.NANOPAQUETE_ALLOWED_ORIGIN ?? '*',
-  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 }
 
-const sendJson = (response: ServerResponse, status: number, data: unknown) => {
-  response.writeHead(status, { 'Content-Type': 'application/json', ...corsHeaders })
+const sendJson = (response: ServerResponse, status: number, data: unknown, headers: Record<string, string> = {}) => {
+  response.writeHead(status, { 'Content-Type': 'application/json', ...corsHeaders, ...headers })
   response.end(JSON.stringify(data))
 }
 
@@ -302,31 +303,31 @@ const escapeHtml = (value: string | number | undefined) =>
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&#039;')
 
-const constantTimeEquals = (left: string, right: string) => {
-  const leftBuffer = Buffer.from(left)
-  const rightBuffer = Buffer.from(right)
+const custodianSessionCookieName = 'nanopaquete_custodian_session'
 
-  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer)
+const getRequestCookie = (request: IncomingMessage, name: string) => {
+  const cookieHeader = request.headers.cookie ?? ''
+  return cookieHeader
+    .split(';')
+    .map((cookie) => cookie.trim())
+    .find((cookie) => cookie.startsWith(`${name}=`))
+    ?.slice(name.length + 1)
 }
 
-const isAdminAuthorized = (request: IncomingMessage) => {
-  const authorization = request.headers.authorization ?? ''
-  if (!authorization.startsWith('Basic ')) return false
-
-  const credentials = Buffer.from(authorization.slice('Basic '.length), 'base64').toString('utf8')
-  const [user, ...passwordParts] = credentials.split(':')
-  const password = passwordParts.join(':')
-
-  return constantTimeEquals(user, adminUser) && constantTimeEquals(password, adminPassword)
+const createCustodianSessionCookie = (session: CustodianSession) => {
+  const maxAge = Math.max(0, Math.floor((new Date(session.expiresAt).getTime() - Date.now()) / 1000))
+  return `${custodianSessionCookieName}=${encodeURIComponent(session.id)}; Path=/admin; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`
 }
 
-const requestAdminAuth = (response: ServerResponse) => {
-  response.writeHead(401, {
-    'Content-Type': 'text/plain; charset=utf-8',
-    'WWW-Authenticate': 'Basic realm="Nanopaquete"',
-    ...corsHeaders,
-  })
-  response.end('Autenticacion requerida')
+const clearCustodianSessionCookie = () =>
+  `${custodianSessionCookieName}=; Path=/admin; HttpOnly; SameSite=Lax; Max-Age=0`
+
+const getAdminCustodianSession = (store: Store, request: IncomingMessage) =>
+  getValidCustodianSession(store, decodeURIComponent(getRequestCookie(request, custodianSessionCookieName) ?? ''))
+
+const redirectToCustodianAuth = (response: ServerResponse) => {
+  response.writeHead(303, { Location: '/?admin=1', ...corsHeaders })
+  response.end()
 }
 
 const readRequestText = async (request: IncomingMessage) => {
@@ -484,6 +485,56 @@ const rawToNano = (raw: bigint) => {
 const addNanoAmounts = (...amounts: string[]) =>
   rawToNano(amounts.reduce((total, amount) => total + BigInt(nanoToRaw(amount)), 0n))
 
+const getOfferEscrowAccount = (store: Store, offer: OfferRecord) =>
+  offer.escrowNanoAccountId
+    ? store.nanoAccounts.find((account) => account.id === offer.escrowNanoAccountId)
+    : store.nanoAccounts.find((account) => account.linkedOfferId === offer.id)
+
+const assignEscrowAccountToOffer = async (store: Store, offer: OfferRecord) => {
+  const existing = getOfferEscrowAccount(store, offer)
+  if (existing) {
+    existing.status = 'ASSIGNED'
+    existing.purpose = 'ESCROW'
+    existing.linkedOfferId = offer.id
+    existing.label = existing.label || `Custodia oferta ${offer.id}`
+    existing.updatedAt = new Date().toISOString()
+    existing.lastUsedAt = existing.lastUsedAt ?? existing.updatedAt
+    offer.escrowNanoAccountId = existing.id
+    offer.escrowNanoAddress = existing.account
+    return existing
+  }
+
+  const available = store.nanoAccounts.find(
+    (account) => account.status === 'AVAILABLE' && account.purpose === 'ESCROW' && !account.linkedOfferId,
+  )
+  const account = available ?? await createNanoAccountRecord({
+    label: `Custodia oferta ${offer.id}`,
+    purpose: 'ESCROW',
+    notes: 'Cuenta temporal asignada automaticamente a una negociacion.',
+  })
+
+  if (!available) store.nanoAccounts.unshift(account)
+  account.status = 'ASSIGNED'
+  account.purpose = 'ESCROW'
+  account.linkedOfferId = offer.id
+  account.label = account.label || `Custodia oferta ${offer.id}`
+  account.updatedAt = new Date().toISOString()
+  account.lastUsedAt = account.updatedAt
+  offer.escrowNanoAccountId = account.id
+  offer.escrowNanoAddress = account.account
+  return account
+}
+
+const releaseUnusedEscrowAccount = (store: Store, offer: OfferRecord) => {
+  const account = getOfferEscrowAccount(store, offer)
+  if (!account || offer.paymentHash) return
+  account.status = 'AVAILABLE'
+  account.linkedOfferId = undefined
+  account.updatedAt = new Date().toISOString()
+  offer.escrowNanoAccountId = undefined
+  offer.escrowNanoAddress = undefined
+}
+
 const getValidCustodianSession = (store: Store, sessionId: string) => {
   const normalized = normalizeClientSessionId(sessionId)
   if (!normalized) return undefined
@@ -498,20 +549,33 @@ const canCustodianReleaseTakenOffer = (offer: OfferRecord) =>
   Date.now() - new Date(offer.takenAt || '').getTime() >= takenOfferCustodianReleaseMs
 
 const releaseTakenOffer = (offer: OfferRecord) => {
+  const offerType = offer.offerType ?? 'SELL'
   offer.status = 'ACTIVE'
-  offer.buyerNanoAddress = undefined
-  offer.buyerCountry = undefined
-  offer.buyerDialCode = undefined
-  offer.buyerContact = undefined
-  offer.buyerSessionId = undefined
+  if (offerType === 'SELL') {
+    offer.buyerNanoAddress = undefined
+    offer.buyerCountry = undefined
+    offer.buyerDialCode = undefined
+    offer.buyerContact = undefined
+    offer.buyerSessionId = undefined
+  } else {
+    offer.sellerCountry = undefined
+    offer.sellerDialCode = undefined
+    offer.sellerContact = undefined
+    offer.sellerSessionId = undefined
+  }
   offer.takenAt = undefined
   offer.releaseFeeIntentId = undefined
+  offer.escrowNanoAccountId = undefined
+  offer.escrowNanoAddress = undefined
 }
 
 
 const publicOffer = (offer: OfferRecord, context: { clientSessionId?: string; custodianSession?: CustodianSession } = {}) => {
   const offerType = offer.offerType ?? 'SELL'
-  const isSeller = Boolean(context.clientSessionId && offer.sellerSessionId && offer.sellerSessionId === context.clientSessionId)
+  const isSellOwner = Boolean(context.clientSessionId && offer.sellerSessionId && offer.sellerSessionId === context.clientSessionId)
+  const isBuyOwner = Boolean(offerType === 'BUY' && context.clientSessionId && offer.buyerSessionId === context.clientSessionId)
+  const isOwner = isSellOwner || isBuyOwner
+  const isNanoSeller = Boolean(context.clientSessionId && offer.sellerSessionId && offer.sellerSessionId === context.clientSessionId)
   const isCustodian = Boolean(context.custodianSession && context.custodianSession.custodianId === offer.custodianId)
 
   return {
@@ -522,13 +586,29 @@ const publicOffer = (offer: OfferRecord, context: { clientSessionId?: string; cu
     price: offer.price,
     status: offer.status,
     createdAt: offer.createdAt,
-    isOwnOffer: isSeller || Boolean(offerType === 'BUY' && context.clientSessionId && offer.buyerSessionId === context.clientSessionId),
-    canEditPrice: isSeller && offer.status === 'ACTIVE',
-    canDepositNano: isSeller && offer.status === 'NEGOTIATION' && !offer.paymentHash,
-    canConfirmPayment: isSeller && offer.status === 'NEGOTIATION' && Boolean(offer.paymentHash),
+    isOwnOffer: isOwner,
+    canEditPrice: isOwner && offer.status === 'ACTIVE',
+    canDeleteOffer: isOwner && offer.status === 'ACTIVE',
+    canDepositNano: isNanoSeller && offer.status === 'NEGOTIATION' && !offer.paymentHash,
+    canConfirmPayment: isNanoSeller && offer.status === 'NEGOTIATION' && Boolean(offer.paymentHash),
     canCustodianReleaseOffer: isCustodian && canCustodianReleaseTakenOffer(offer),
+    canCustodianReleaseFunds: isCustodian && offer.status === 'RELEASING',
     sellerDepositConfirmed: Boolean(offer.paymentHash),
-    ...(isSeller && offer.status === 'NEGOTIATION' && offer.buyerContact
+    ...(isSellOwner && offer.status === 'NEGOTIATION' && offer.buyerContact
+      ? {
+          buyerCountry: offer.buyerCountry,
+          buyerDialCode: offer.buyerDialCode,
+          buyerContact: offer.buyerContact,
+        }
+      : {}),
+    ...(isBuyOwner && offer.status === 'NEGOTIATION' && offer.sellerContact
+      ? {
+          sellerCountry: offer.sellerCountry,
+          sellerDialCode: offer.sellerDialCode,
+          sellerContact: offer.sellerContact,
+        }
+      : {}),
+    ...(isNanoSeller && offer.status === 'NEGOTIATION' && offer.buyerContact
       ? {
           buyerCountry: offer.buyerCountry,
           buyerDialCode: offer.buyerDialCode,
@@ -545,19 +625,17 @@ const publicOffer = (offer: OfferRecord, context: { clientSessionId?: string; cu
           buyerContact: offer.buyerContact,
         }
       : {}),
-    ...(isCustodian && offer.status === 'RELEASING' && offer.buyerNanoAddress
-      ? {
-          custodianReleaseUri: createNanoPaymentUri(offer.buyerNanoAddress, offer.amountXno),
-        }
-      : {}),
   }
 }
 
-const takenOfferResponse = (store: Store, offer: OfferRecord) => ({
-  offer: publicOffer(offer),
+const takenOfferResponse = (store: Store, offer: OfferRecord, clientSessionId?: string) => ({
+  offer: publicOffer(offer, { clientSessionId }),
   sellerContact: offer.sellerContact ?? '',
   sellerCountry: offer.sellerCountry,
   sellerDialCode: offer.sellerDialCode,
+  buyerContact: offer.buyerContact ?? '',
+  buyerCountry: offer.buyerCountry,
+  buyerDialCode: offer.buyerDialCode,
   custodianContact: getCustodianById(store, offer.custodianId).contact,
 })
 
@@ -629,6 +707,8 @@ const renderAdmin = (offers: OfferRecord[]) => `<!doctype html>
               <dt>Estado</dt><dd><span class="status">${statusLabel(offer.status)}</span></dd>
               <dt>ID oferta</dt><dd>${escapeHtml(offer.id)}</dd>
               <dt>ID custodia</dt><dd>${escapeHtml(offer.escrowId)}</dd>
+              <dt>Cuenta temporal</dt><dd>${escapeHtml(offer.escrowNanoAddress)}</dd>
+              <dt>ID cuenta temporal</dt><dd>${escapeHtml(offer.escrowNanoAccountId)}</dd>
               <dt>Pais vendedor</dt><dd>${escapeHtml(offer.sellerCountry)}</dd>
               <dt>Extension contacto</dt><dd>${escapeHtml(offer.sellerDialCode)}</dd>
               <dt>Contacto vendedor</dt><dd>${escapeHtml(offer.sellerContact)}</dd>
@@ -1058,10 +1138,11 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     const store = await readStore()
     const offer = store.offers.find(
       (item) =>
-        ['NEGOTIATION', 'RELEASING'].includes(item.status) && item.buyerSessionId === clientSessionId,
+        ['NEGOTIATION', 'RELEASING'].includes(item.status) &&
+        (item.buyerSessionId === clientSessionId || item.sellerSessionId === clientSessionId),
     )
 
-    sendJson(response, 200, { negotiation: offer ? takenOfferResponse(store, offer) : null })
+    sendJson(response, 200, { negotiation: offer ? takenOfferResponse(store, offer, clientSessionId) : null })
     return
   }
 
@@ -1087,6 +1168,16 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     store.custodianAuthIntents.push(intent)
     await writeStore(store)
     sendJson(response, 201, intent)
+    return
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/custodian-auth/logout') {
+    const body = await readJsonBody(request)
+    const custodianSessionId = normalizeClientSessionId(body.custodianSessionId)
+    const store = await readStore()
+    store.custodianSessions = store.custodianSessions.filter((session) => session.id !== custodianSessionId)
+    await writeStore(store)
+    sendJson(response, 200, { ok: true }, { 'Set-Cookie': clearCustodianSessionCookie() })
     return
   }
 
@@ -1144,7 +1235,12 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       store.custodianSessions.push(session)
       store.usedPayments.push({ hash: payment.hash, purpose: 'custodian_auth', createdAt: new Date().toISOString() })
       await writeStore(store)
-      sendJson(response, 200, { sessionId: session.id, expiresAt: session.expiresAt, custodianId: authenticatedCustodian.id, custodianName: authenticatedCustodian.name, isLeader: isLeaderSession(store, session) })
+      sendJson(
+        response,
+        200,
+        { sessionId: session.id, expiresAt: session.expiresAt, custodianId: authenticatedCustodian.id, custodianName: authenticatedCustodian.name, isLeader: isLeaderSession(store, session) },
+        { 'Set-Cookie': createCustodianSessionCookie(session) },
+      )
     } catch (error) {
       const message = error instanceof Error ? error.message : 'No se pudo autenticar al custodio.'
       sendJson(response, 422, {
@@ -1438,7 +1534,12 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       return
     }
 
-    if (!offer.sellerSessionId || offer.sellerSessionId !== clientSessionId) {
+    const offerType = offer.offerType ?? 'SELL'
+    const isOwner = offerType === 'BUY'
+      ? Boolean(offer.buyerSessionId && offer.buyerSessionId === clientSessionId)
+      : Boolean(offer.sellerSessionId && offer.sellerSessionId === clientSessionId)
+
+    if (!isOwner) {
       sendJson(response, 403, { error: 'Solo la sesion vendedora puede editar el precio.' })
       return
     }
@@ -1449,6 +1550,42 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     }
 
     offer.price = price
+    await writeStore(store)
+    sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId }) })
+    return
+  }
+
+  const deleteOfferMatch = url.pathname.match(/^\/api\/offers\/([^/]+)$/)
+
+  if (request.method === 'DELETE' && deleteOfferMatch) {
+    const offerId = decodeURIComponent(deleteOfferMatch[1])
+    const body = await readJsonBody(request)
+    const clientSessionId = normalizeClientSessionId(body.clientSessionId)
+    const store = await readStore()
+    const offer = store.offers.find((item) => item.id === offerId)
+
+    if (!offer) {
+      sendJson(response, 404, { error: 'La oferta no existe.' })
+      return
+    }
+
+    const offerType = offer.offerType ?? 'SELL'
+    const isOwner = offerType === 'BUY'
+      ? Boolean(offer.buyerSessionId && offer.buyerSessionId === clientSessionId)
+      : Boolean(offer.sellerSessionId && offer.sellerSessionId === clientSessionId)
+
+    if (!isOwner) {
+      sendJson(response, 403, { error: 'Solo la sesion que publico la oferta puede eliminarla.' })
+      return
+    }
+
+    if (offer.status !== 'ACTIVE') {
+      sendJson(response, 409, { error: 'Solo puedes eliminar una oferta disponible.' })
+      return
+    }
+
+    offer.status = 'CANCELLED'
+    offer.closedAt = new Date().toISOString()
     await writeStore(store)
     sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId }) })
     return
@@ -1465,16 +1602,6 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     const buyerContact = normalizeText(body.buyerContact)
     const clientSessionId = normalizeClientSessionId(body.clientSessionId)
 
-    if (!isNanoAddress(buyerNanoAddress)) {
-      sendJson(response, 400, { error: 'Ingresa una cuenta nano valida para recibir los XNO.' })
-      return
-    }
-
-    if (!buyerCountry || !buyerDialCode || buyerContact.length < 6) {
-      sendJson(response, 400, { error: 'Ingresa pais, extension y contacto valido del comprador.' })
-      return
-    }
-
     const store = await readStore()
     const offer = store.offers.find((item) => item.id === offerId)
 
@@ -1483,19 +1610,35 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       return
     }
 
+    const offerType = offer.offerType ?? 'SELL'
+
+    if (offerType === 'SELL' && !isNanoAddress(buyerNanoAddress)) {
+      sendJson(response, 400, { error: 'Ingresa una cuenta nano valida para recibir los XNO.' })
+      return
+    }
+
+    if (!buyerCountry || !buyerDialCode || buyerContact.length < 6) {
+      sendJson(response, 400, { error: 'Ingresa pais, extension y contacto valido.' })
+      return
+    }
+
     if (offer.status !== 'ACTIVE') {
       sendJson(response, 409, { error: 'Esta oferta ya no esta disponible.' })
       return
     }
 
-    if (offer.sellerSessionId && offer.sellerSessionId === clientSessionId) {
+    if (
+      (offerType === 'SELL' && offer.sellerSessionId && offer.sellerSessionId === clientSessionId) ||
+      (offerType === 'BUY' && offer.buyerSessionId && offer.buyerSessionId === clientSessionId)
+    ) {
       sendJson(response, 403, { error: 'No puedes tomar una oferta que publicaste desde esta sesion.' })
       return
     }
 
     const currentNegotiation = store.offers.find(
       (item) =>
-        ['NEGOTIATION', 'RELEASING'].includes(item.status) && item.buyerSessionId === clientSessionId,
+        ['NEGOTIATION', 'RELEASING'].includes(item.status) &&
+        (item.buyerSessionId === clientSessionId || item.sellerSessionId === clientSessionId),
     )
 
     if (currentNegotiation) {
@@ -1504,15 +1647,23 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     }
 
     offer.status = 'NEGOTIATION'
-    offer.buyerNanoAddress = buyerNanoAddress
-    offer.buyerCountry = buyerCountry
-    offer.buyerDialCode = buyerDialCode
-    offer.buyerContact = buyerContact
-    offer.buyerSessionId = clientSessionId || undefined
+    if (offerType === 'SELL') {
+      offer.buyerNanoAddress = buyerNanoAddress
+      offer.buyerCountry = buyerCountry
+      offer.buyerDialCode = buyerDialCode
+      offer.buyerContact = buyerContact
+      offer.buyerSessionId = clientSessionId || undefined
+    } else {
+      offer.sellerCountry = buyerCountry
+      offer.sellerDialCode = buyerDialCode
+      offer.sellerContact = buyerContact
+      offer.sellerSessionId = clientSessionId || undefined
+    }
     offer.takenAt = new Date().toISOString()
+    await assignEscrowAccountToOffer(store, offer)
     await writeStore(store)
 
-    sendJson(response, 200, takenOfferResponse(store, offer))
+    sendJson(response, 200, takenOfferResponse(store, offer, clientSessionId))
     return
   }
 
@@ -1535,7 +1686,8 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       return
     }
 
-    if (offer.buyerSessionId && offer.buyerSessionId !== clientSessionId) {
+    const takerSessionId = (offer.offerType ?? 'SELL') === 'BUY' ? offer.sellerSessionId : offer.buyerSessionId
+    if (takerSessionId && takerSessionId !== clientSessionId) {
       sendJson(response, 403, { error: 'Solo la sesion que tomo la oferta puede cancelar este proceso.' })
       return
     }
@@ -1545,6 +1697,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       return
     }
 
+    releaseUnusedEscrowAccount(store, offer)
     releaseTakenOffer(offer)
     await writeStore(store)
 
@@ -1594,6 +1747,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       return
     }
 
+    releaseUnusedEscrowAccount(store, offer)
     releaseTakenOffer(offer)
     await writeStore(store)
 
@@ -1630,12 +1784,13 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       return
     }
 
+    const escrowAccount = await assignEscrowAccountToOffer(store, offer)
     const now = Date.now()
     store.releaseFeeIntents = store.releaseFeeIntents.filter(
       (intent) => intent.status !== 'PENDING' || new Date(intent.expiresAt).getTime() > now,
     )
     const existing = store.releaseFeeIntents.find(
-      (intent) => intent.offerId === offer.id && intent.status === 'PENDING',
+      (intent) => intent.offerId === offer.id && intent.status === 'PENDING' && intent.receiverAddress === escrowAccount.account,
     )
 
     if (existing) {
@@ -1643,15 +1798,14 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       return
     }
 
-    const custodian = getCustodianById(store, offer.custodianId)
     const depositAmountXno = addNanoAmounts(offer.amountXno, custodyFeeXno)
     const intent: ReleaseFeeIntent = {
       id: `rel_${randomUUID().replaceAll('-', '').slice(0, 18)}`,
       offerId: offer.id,
       senderWallet: '',
-      receiverAddress: custodian.wallet,
+      receiverAddress: escrowAccount.account,
       amountXno: depositAmountXno,
-      paymentUri: createNanoPaymentUri(custodian.wallet, depositAmountXno),
+      paymentUri: createNanoPaymentUri(escrowAccount.account, depositAmountXno),
       status: 'PENDING',
       createdAt: new Date(now).toISOString(),
       expiresAt: new Date(now + releaseFeeTtlMs).toISOString(),
@@ -1705,21 +1859,38 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       return
     }
 
+    const escrowAccount = getOfferEscrowAccount(store, offer)
+    if (!escrowAccount) {
+      sendJson(response, 409, { error: 'Esta oferta no tiene cuenta temporal de custodia asociada.' })
+      return
+    }
+
+    if (!nanoWalletId) {
+      sendJson(response, 409, { error: 'Configura NANO_WALLET_ID en el backend para habilitar liberaciones reales.' })
+      return
+    }
+
     try {
-      const payment = await findIncomingPaymentBySenderAmount({
-        receiverWallet: offer.buyerNanoAddress,
-        senderWallet: getCustodianById(store, offer.custodianId).wallet,
+      const withdrawal = await sendFromPrivateKey({
+        walletId: nanoWalletId,
+        privateKey: decryptSecret(escrowAccount.encryptedPrivateKey),
+        sourceAccount: escrowAccount.account,
+        destinationAccount: offer.buyerNanoAddress,
         amountNano: offer.amountXno,
-        createdAfter: offer.releaseRequestedAt,
-        excludedHashes: store.usedPayments.map((item) => item.hash),
       })
 
       offer.status = 'RELEASED'
-      offer.custodianReleaseHash = payment.hash
+      offer.custodianReleaseHash = withdrawal.blockHash
       offer.closedAt = new Date().toISOString()
-      store.usedPayments.push({ hash: payment.hash, purpose: 'custodian_release', createdAt: new Date().toISOString() })
+      escrowAccount.commissionAvailableXno = addNanoAmounts(escrowAccount.commissionAvailableXno || '0', custodyFeeXno)
+      escrowAccount.updatedAt = new Date().toISOString()
+      escrowAccount.notes = [
+        escrowAccount.notes,
+        `Liberacion de ${offer.amountXno} XNO a ${offer.buyerNanoAddress}. Comision disponible: ${custodyFeeXno} XNO.`,
+      ].filter(Boolean).join('\n')
+      store.usedPayments.push({ hash: withdrawal.blockHash, purpose: 'custodian_release', createdAt: new Date().toISOString() })
       await writeStore(store)
-      sendJson(response, 200, { offer: publicOffer(offer, { custodianSession }), paymentHash: payment.hash })
+      sendJson(response, 200, { offer: publicOffer(offer, { custodianSession }), paymentHash: withdrawal.blockHash })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'No se pudo validar la liberacion del custodio.'
       sendJson(response, 422, {
@@ -1762,6 +1933,14 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
 
     if (!offer.sellerSessionId || offer.sellerSessionId !== clientSessionId) {
       sendJson(response, 403, { error: 'Solo la sesion vendedora que publico la oferta puede confirmar el pago.' })
+      return
+    }
+
+    const escrowAccount = await assignEscrowAccountToOffer(store, offer)
+    if (intent.receiverAddress !== escrowAccount.account) {
+      intent.status = 'EXPIRED'
+      await writeStore(store)
+      sendJson(response, 409, { error: 'Esta solicitud de deposito ya no corresponde a la cuenta temporal de la negociacion. Inicia una nueva.' })
       return
     }
 
@@ -1836,19 +2015,29 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
 }
 
 const handleAdmin = async (request: IncomingMessage, response: ServerResponse, url: URL) => {
-  if (!isAdminAuthorized(request)) {
-    requestAdminAuth(response)
+  const store = await readStore()
+  const custodianSession = getAdminCustodianSession(store, request)
+
+  if (!custodianSession) {
+    await writeStore(store)
+    redirectToCustodianAuth(response)
+    return
+  }
+
+  await writeStore(store)
+
+  if (request.method === 'GET' && (url.pathname === '/admin' || url.pathname === '/admin/')) {
+    response.writeHead(303, { Location: '/admin/offers', ...corsHeaders })
+    response.end()
     return
   }
 
   if (request.method === 'GET' && url.pathname === '/admin/offers') {
-    const store = await readStore()
     sendHtml(response, 200, renderAdmin(store.offers))
     return
   }
 
   if (request.method === 'GET' && url.pathname === '/admin/nano-accounts') {
-    const store = await readStore()
     sendHtml(response, 200, renderNanoAccountsAdmin(store.nanoAccounts, getActiveCustodian(store).wallet, normalizeText(url.searchParams.get('message'))))
     return
   }
@@ -1863,7 +2052,6 @@ const handleAdmin = async (request: IncomingMessage, response: ServerResponse, u
     }
 
     try {
-      const store = await readStore()
       const account = await createNanoAccountRecord({
         label: normalizeText(form.get('label')),
         purpose: purpose as NanoAccountRecord['purpose'],
@@ -1905,7 +2093,6 @@ const handleAdmin = async (request: IncomingMessage, response: ServerResponse, u
       return
     }
 
-    const store = await readStore()
     const account = store.nanoAccounts.find((item) => item.id === accountId)
 
     if (!account) {
@@ -1932,7 +2119,6 @@ const handleAdmin = async (request: IncomingMessage, response: ServerResponse, u
 
   if (request.method === 'POST' && nanoAccountWithdrawalMatch) {
     const accountId = decodeURIComponent(nanoAccountWithdrawalMatch[1])
-    const store = await readStore()
     const account = store.nanoAccounts.find((item) => item.id === accountId)
     const destination = getActiveCustodian(store).wallet
 
@@ -2004,7 +2190,6 @@ const handleAdmin = async (request: IncomingMessage, response: ServerResponse, u
       return
     }
 
-    const store = await readStore()
     const offer = store.offers.find((item) => item.id === offerId)
 
     if (!offer) {
@@ -2050,7 +2235,7 @@ const server = createServer(async (request, response) => {
       return
     }
 
-    if (url.pathname.startsWith('/admin/')) {
+    if (url.pathname === '/admin' || url.pathname.startsWith('/admin/')) {
       await handleAdmin(request, response, url)
       return
     }
