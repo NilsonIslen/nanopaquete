@@ -408,9 +408,12 @@ export async function sendFromPrivateKey({
   destinationAccount: string
   amountNano: string
 }): Promise<NanoSendResult> {
-  if (!walletId.trim()) throw new Error('Configura NANO_WALLET_ID para poder retirar fondos desde cuentas generadas.')
   if (!isNanoAddress(sourceAccount)) throw new Error('La cuenta Nano de origen no es valida.')
   if (!isNanoAddress(destinationAccount)) throw new Error('La cuenta Nano destino no es valida.')
+
+  if (!walletId.trim()) {
+    return sendFromPrivateKeyStateless({ privateKey, sourceAccount, destinationAccount, amountNano })
+  }
 
   await importPrivateKey(walletId, privateKey, sourceAccount)
   const receivedBlocks = await receivePendingBlocks(walletId, sourceAccount)
@@ -426,6 +429,70 @@ export async function sendFromPrivateKey({
   if (!isNanoHash(blockHash)) {
     throw new Error('El nodo Nano no devolvio un hash valido para el retiro.')
   }
+
+  return { blockHash, receivedBlocks }
+}
+
+async function sendFromPrivateKeyStateless({
+  privateKey,
+  sourceAccount,
+  destinationAccount,
+  amountNano,
+}: {
+  privateKey: string
+  sourceAccount: string
+  destinationAccount: string
+  amountNano: string
+}): Promise<NanoSendResult> {
+  const publicKey = nanocurrency.derivePublicKey(privateKey)
+  const derivedAccount = nanocurrency.deriveAddress(publicKey, { useNanoPrefix: true })
+  if (derivedAccount !== sourceAccount) throw new Error('La clave privada no corresponde a la cuenta Nano seleccionada.')
+
+  const receivedBlocks: string[] = []
+  const representativeFallback = sourceAccount
+  const accountInfo = await getAccountInfo(sourceAccount)
+  let frontier = accountInfo.frontier
+  let balanceRaw = accountInfo.balanceRaw
+  const representative = accountInfo.representative || representativeFallback
+
+  const receivable = await nanoRpc({
+    action: 'receivable',
+    account: sourceAccount,
+    count: '100',
+    source: 'true',
+    include_only_confirmed: 'true',
+  })
+
+  for (const [hash, entry] of getReceivableEntries(receivable)) {
+    if (!isNanoHash(hash) || !entry.amount) continue
+    const nextBalanceRaw = (balanceRaw + BigInt(entry.amount)).toString()
+    const work = await getWork(frontier ?? publicKey)
+    const receive = nanocurrency.createBlock(privateKey, {
+      work,
+      representative,
+      balance: nextBalanceRaw,
+      previous: frontier,
+      link: normalizeNanoHash(hash),
+    })
+    const receivedHash = await processStateBlock(receive.block, 'receive')
+    receivedBlocks.push(receivedHash)
+    frontier = receivedHash
+    balanceRaw = BigInt(nextBalanceRaw)
+  }
+
+  const amountRaw = BigInt(nanoToRaw(amountNano))
+  if (balanceRaw < amountRaw) throw new Error('La cuenta temporal no tiene saldo suficiente para liberar los fondos.')
+  if (!frontier) throw new Error('La cuenta temporal no tiene un bloque abierto para enviar fondos.')
+
+  const work = await getWork(frontier)
+  const send = nanocurrency.createBlock(privateKey, {
+    work,
+    representative,
+    balance: (balanceRaw - amountRaw).toString(),
+    previous: frontier,
+    link: destinationAccount,
+  })
+  const blockHash = await processStateBlock(send.block, 'send')
 
   return { blockHash, receivedBlocks }
 }
@@ -450,6 +517,58 @@ async function importPrivateKey(walletId: string, privateKey: string, expectedAc
   if (account && account !== expectedAccount) {
     throw new Error('La clave privada no corresponde a la cuenta Nano seleccionada.')
   }
+}
+
+async function getAccountInfo(account: string) {
+  try {
+    const data = await nanoRpc({
+      action: 'account_info',
+      account,
+      representative: 'true',
+    })
+
+    return {
+      frontier: isNanoHash(String(data.frontier ?? '')) ? normalizeNanoHash(String(data.frontier)) : null,
+      balanceRaw: /^\d+$/.test(String(data.balance ?? '')) ? BigInt(String(data.balance)) : 0n,
+      representative: isNanoAddress(String(data.representative ?? '')) ? String(data.representative) : '',
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message.toLowerCase() : ''
+    if (message.includes('account not found') || message.includes('not found')) {
+      return { frontier: null, balanceRaw: 0n, representative: '' }
+    }
+
+    throw error
+  }
+}
+
+async function getWork(hashOrPublicKey: string) {
+  try {
+    const data = await nanoRpc({
+      action: 'work_generate',
+      hash: hashOrPublicKey,
+    })
+    const work = String(data.work ?? '')
+    if (nanocurrency.checkWork(work)) return work
+  } catch {
+    // Fall through to local work generation.
+  }
+
+  const work = await nanocurrency.computeWork(hashOrPublicKey)
+  if (!work) throw new Error('No se pudo generar work para publicar la transferencia Nano.')
+  return work
+}
+
+async function processStateBlock(block: Record<string, string>, subtype: 'receive' | 'send') {
+  const data = await nanoRpc({
+    action: 'process',
+    json_block: 'true',
+    subtype,
+    block: JSON.stringify(block),
+  })
+  const blockHash = String(data.hash ?? '').toUpperCase()
+  if (!isNanoHash(blockHash)) throw new Error('El nodo Nano no devolvio un hash valido para el envio.')
+  return blockHash
 }
 
 async function receivePendingBlocks(walletId: string, account: string) {
