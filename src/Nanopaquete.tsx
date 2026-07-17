@@ -4,6 +4,7 @@ import { QRCodeSVG } from 'qrcode.react'
 import {
   addManagedCustodian,
   cancelTakenOffer,
+  confirmSellerPayment,
   deleteManagedCustodian,
   getManagedCustodians,
   getBuyerNegotiation,
@@ -14,22 +15,18 @@ import {
   releaseExpiredTakenOffer,
   startCustodianAuth,
   startReleaseFee,
-  startSellerPayment,
   takeOffer,
   updateOfferPrice,
   updateManagedCustodianLeader,
   verifyCustodianAuth,
   verifyCustodianRelease,
   verifyReleaseFee,
-  verifySellerPayment,
   type Currency,
   type CustodianAuthIntent,
   type CustodianOption,
   type CustodianSession,
-  type EscrowSession,
   type PublicOffer,
   type ReleaseFeeIntent,
-  type SellerPaymentIntent,
   type TakenOffer,
   type ManagedCustodian,
 } from './api'
@@ -144,8 +141,6 @@ const initialSellerForm = {
   sellerContact: '',
 }
 
-type SellerForm = typeof initialSellerForm
-
 const initialBuyerForm = {
   nanoAddress: '',
   country: 'Colombia',
@@ -172,8 +167,6 @@ const initialCustodianForm = {
   isLeader: false,
 }
 
-const sellerOfferDraftStorageKey = 'nanopaquete:seller-offer-draft'
-const sellerPaymentStorageKey = 'nanopaquete:seller-payment'
 const takenOfferStorageKey = 'nanopaquete:taken-offer'
 const custodianSessionStorageKey = 'nanopaquete:custodian-session'
 const clientSessionStorageKey = 'nanopaquete:client-session'
@@ -188,34 +181,6 @@ const getClientSessionId = () => {
   const created = createClientSessionId()
   window.localStorage.setItem(clientSessionStorageKey, created)
   return created
-}
-
-const getStoredSellerPayment = () => {
-  try {
-    const value = window.localStorage.getItem(sellerPaymentStorageKey)
-    const payment = value ? (JSON.parse(value) as SellerPaymentIntent) : null
-    return payment && new Date(payment.expiresAt).getTime() > Date.now() ? payment : null
-  } catch {
-    return null
-  }
-}
-
-const getStoredSellerOfferDraft = (): SellerForm => {
-  try {
-    const value = window.localStorage.getItem(sellerOfferDraftStorageKey)
-    const draft = value ? (JSON.parse(value) as Partial<SellerForm>) : null
-    const currency = currencies.includes(draft?.currency as Currency) ? draft?.currency as Currency : initialSellerForm.currency
-
-    return draft
-      ? {
-          ...initialSellerForm,
-          ...draft,
-          currency,
-        }
-      : initialSellerForm
-  } catch {
-    return initialSellerForm
-  }
 }
 
 const getStoredTakenOffer = () => {
@@ -294,11 +259,9 @@ const groupOffers = (offers: PublicOffer[]): OfferGroup[] => {
 }
 
 export function Nanopaquete() {
-  const [sellerForm, setSellerForm] = useState(getStoredSellerOfferDraft)
+  const [sellerForm, setSellerForm] = useState(initialSellerForm)
   const [buyOfferForm, setBuyOfferForm] = useState(initialBuyOfferForm)
   const [createOfferType, setCreateOfferType] = useState<'SELL' | 'BUY'>('SELL')
-  const [sellerPayment, setSellerPayment] = useState<SellerPaymentIntent | null>(getStoredSellerPayment)
-  const [escrowSession, setEscrowSession] = useState<EscrowSession | null>(null)
   const [offers, setOffers] = useState<PublicOffer[]>([])
   const [custodians, setCustodians] = useState<CustodianOption[]>([])
   const [managedCustodians, setManagedCustodians] = useState<ManagedCustodian[]>([])
@@ -405,15 +368,6 @@ export function Nanopaquete() {
 
     return () => window.clearInterval(interval)
   }, [clientSessionId, takenOfferId])
-
-  useEffect(() => {
-    if (sellerPayment) {
-      window.localStorage.setItem(sellerPaymentStorageKey, JSON.stringify(sellerPayment))
-      return
-    }
-
-    window.localStorage.removeItem(sellerPaymentStorageKey)
-  }, [sellerPayment])
 
   useEffect(() => {
     if (takenOffer) {
@@ -528,19 +482,27 @@ export function Nanopaquete() {
     }
   }
 
-  const handleStartSellerPayment = async (event: React.FormEvent<HTMLFormElement>) => {
+  const handlePublishSellOffer = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     setError(null)
-    setEscrowSession(null)
-    setLoading('start-payment')
+    setLoading('publish-sell')
 
     try {
-      const intent = await startSellerPayment(clientSessionId, selectedCustodianId, sellerForm.amountXno)
-      window.localStorage.setItem(sellerOfferDraftStorageKey, JSON.stringify(sellerForm))
-      setSellerPayment(intent)
-      setActiveView('create-offer')
+      await publishOffer({
+        amountXno: sellerForm.amountXno,
+        currency: sellerForm.currency,
+        price: sellerForm.price,
+        sellerCountry: sellerForm.sellerCountry,
+        sellerDialCode: sellerForm.sellerDialCode,
+        sellerContact: sellerForm.sellerContact,
+        custodianId: selectedCustodianId,
+        clientSessionId,
+      })
+      setSellerForm(initialSellerForm)
+      setActiveView('offers')
+      await loadOffers()
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'No se pudo iniciar el deposito.')
+      setError(requestError instanceof Error ? requestError.message : 'No se pudo publicar la oferta de venta.')
     } finally {
       setLoading(null)
     }
@@ -567,48 +529,6 @@ export function Nanopaquete() {
       await loadOffers()
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'No se pudo publicar la oferta de compra.')
-    } finally {
-      setLoading(null)
-    }
-  }
-
-
-  const handleCancelSellerPayment = () => {
-    setSellerPayment(null)
-    setError(null)
-  }
-
-  const handleReturnToSellerForm = () => {
-    setEscrowSession(null)
-    setSellerPayment(null)
-    setSellerForm(initialSellerForm)
-    setError(null)
-    window.localStorage.removeItem(sellerOfferDraftStorageKey)
-  }
-
-  const handleVerifySellerPayment = async () => {
-    if (!sellerPayment) return
-    setError(null)
-    setLoading('verify-payment')
-
-    try {
-      const session = await verifySellerPayment(sellerPayment.intentId, clientSessionId)
-      await publishOffer({
-        escrowId: session.escrowId,
-        publishToken: session.publishToken,
-        currency: sellerForm.currency,
-        price: sellerForm.price,
-        sellerCountry: sellerForm.sellerCountry,
-        sellerDialCode: sellerForm.sellerDialCode,
-        sellerContact: sellerForm.sellerContact,
-      })
-      setEscrowSession(session)
-      setSellerPayment(null)
-      setSellerForm(initialSellerForm)
-      window.localStorage.removeItem(sellerOfferDraftStorageKey)
-      await loadOffers()
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'El deposito aun no fue confirmado o no se pudo publicar la oferta.')
     } finally {
       setLoading(null)
     }
@@ -677,7 +597,7 @@ export function Nanopaquete() {
       const intent = await startReleaseFee(offerId, clientSessionId)
       setReleaseFeeIntent(intent)
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'No se pudo iniciar la liberacion.')
+      setError(requestError instanceof Error ? requestError.message : 'No se pudo iniciar el deposito.')
     } finally {
       setLoading(null)
     }
@@ -693,7 +613,21 @@ export function Nanopaquete() {
       setReleaseFeeIntent(null)
       await loadOffers()
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'No se pudo validar la comision de liberacion.')
+      setError(requestError instanceof Error ? requestError.message : 'No se pudo validar el deposito.')
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  const handleConfirmSellerPayment = async (offerId: string) => {
+    setError(null)
+    setLoading(`confirm-payment:${offerId}`)
+
+    try {
+      await confirmSellerPayment(offerId, clientSessionId)
+      await loadOffers()
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'No se pudo confirmar el pago recibido.')
     } finally {
       setLoading(null)
     }
@@ -1016,7 +950,7 @@ export function Nanopaquete() {
           <div className="panel donation-panel">
             <h2>Donaciones</h2>
             <p>Las donaciones ayudan a sostener el desarrollo, el mantenimiento y la infraestructura necesaria para que Nanopaquete funcione de forma continua.</p>
-            <p>Cualquier aporte en Nano se recibe en la cuenta del custodio lider actual.</p>
+            <p>Cualquier aporte en Nano se recibe en la cuenta de administración actual.</p>
             {donationPaymentUri ? (
               <>
                 <div className="payment-actions">
@@ -1035,7 +969,7 @@ export function Nanopaquete() {
                 <dl>
                   <dt>Cuenta Nano</dt>
                   <dd>{donationWallet}</dd>
-                  <dt>Custodio lider</dt>
+                  <dt>Administrador</dt>
                   <dd>{donationCustodian?.name ?? 'No disponible'}</dd>
                 </dl>
               </>
@@ -1060,22 +994,20 @@ export function Nanopaquete() {
             <p>Cuando un comprador toma la oferta, ingresa su número de contacto y la cuenta Nano donde espera recibir los fondos. Nanopaquete le informa que el vendedor está siendo notificado para depositar los XNO.</p>
             <p>El vendedor recibe la notificación, ve el botón y el QR de depósito, y deposita la cantidad publicada más el 0,2% de comisión de plataforma.</p>
             <p>Cuando el depósito queda confirmado, el vendedor ve el contacto del comprador y se le habilita el botón para confirmar el pago recibido. El comprador ve el contacto del vendedor y puede comunicarse para acordar el pago con la tranquilidad de que los XNO están en custodia.</p>
-            <p>Cuando el vendedor confirma que recibió el pago, Nanopaquete transfiere los XNO a la cuenta registrada por el comprador. La comisión queda disponible para retiro desde la página privada de Custodio.</p>
+            <p>Cuando el vendedor confirma que recibió el pago, Nanopaquete transfiere los XNO a la cuenta registrada por el comprador y cierra la negociación.</p>
             <h3>Publicar compra de Nano</h3>
             <p>El comprador publica una oferta indicando la cantidad de XNO que quiere comprar, el activo que entrega a cambio, la cantidad de ese activo, su cuenta Nano receptora y su número de contacto.</p>
             <p>Cuando un vendedor toma la oferta, ingresa su número de contacto. Nanopaquete crea la cuenta Nano temporal de custodia y habilita al vendedor el botón y el QR para depositar.</p>
             <p>El vendedor deposita la cantidad de XNO de la oferta más el 0,2% de comisión de plataforma. Cuando el depósito queda confirmado, Nanopaquete notifica al comprador y muestra los números de contacto para que ambas partes acuerden el pago.</p>
-            <p>Cuando el comprador paga, el vendedor confirma la recepción del pago y Nanopaquete libera los XNO a la cuenta Nano registrada por el comprador. La comisión queda disponible para retiro desde la página privada de Custodio.</p>
-            <h3>Custodio</h3>
-            <p>El custodio es Nanopaquete. Su función es crear y proteger las cuentas temporales de custodia, detectar depósitos, liberar fondos cuando corresponde y conservar la comisión de plataforma.</p>
-            <p>La página privada de Custodio permite revisar negociaciones, ver los contactos de las dos partes en caso de disputa y retirar la comisión disponible por cada operación completada.</p>
+            <p>Cuando el comprador paga, el vendedor confirma la recepción del pago y Nanopaquete libera los XNO a la cuenta Nano registrada por el comprador.</p>
             <h3>Posibles disputas</h3>
+            <p>Si aparece una disputa durante una negociación, conserva los comprobantes y contacta al administrador de Nanopaquete al 3008188284.</p>
             <div className="guide-disputes">
-              <p><strong>Una parte no responde:</strong> la otra parte debe conservar comprobantes y esperar la revisión desde la página privada de Custodio.</p>
+              <p><strong>Una parte no responde:</strong> la otra parte debe conservar comprobantes y solicitar revisión al administrador.</p>
               <p><strong>El pago externo no se confirma:</strong> los XNO permanecen en custodia hasta que exista una confirmación suficiente o una decisión administrativa.</p>
               <p><strong>Una parte ingresó un contacto incorrecto:</strong> la revisión se hace con la información disponible en la negociación y los comprobantes que pueda aportar cada parte.</p>
               <p><strong>El comprador ingresó una cuenta Nano incorrecta:</strong> la cuenta Nano debe revisarse antes de confirmar la operación, porque la liberación se realiza hacia la cuenta registrada en la negociación.</p>
-              <p><strong>Hay una falla técnica:</strong> la persona con acceso a la página privada de Custodio revisa los datos de la negociación, los depósitos, los contactos y el estado de la cuenta temporal.</p>
+              <p><strong>Hay una falla técnica:</strong> el administrador revisa los datos de la negociación, los depósitos, los contactos y el estado de la cuenta temporal.</p>
             </div>
           </div>
         </section>
@@ -1091,27 +1023,25 @@ export function Nanopaquete() {
             <p>Las operaciones tomadas usan custodia Nano administrada por Nanopaquete y una comisión de plataforma del 0,2%.</p>
           </div>
 
-          {!sellerPayment && !escrowSession && (
-            <div className="offer-type-tabs" role="tablist" aria-label="Tipo de oferta">
-              <button
-                className={createOfferType === 'SELL' ? 'selected' : ''}
-                type="button"
-                onClick={() => setCreateOfferType('SELL')}
-              >
-                Venta Nano
-              </button>
-              <button
-                className={createOfferType === 'BUY' ? 'selected' : ''}
-                type="button"
-                onClick={() => setCreateOfferType('BUY')}
-              >
-                Compra Nano
-              </button>
-            </div>
-          )}
+          <div className="offer-type-tabs" role="tablist" aria-label="Tipo de oferta">
+            <button
+              className={createOfferType === 'SELL' ? 'selected' : ''}
+              type="button"
+              onClick={() => setCreateOfferType('SELL')}
+            >
+              Venta Nano
+            </button>
+            <button
+              className={createOfferType === 'BUY' ? 'selected' : ''}
+              type="button"
+              onClick={() => setCreateOfferType('BUY')}
+            >
+              Compra Nano
+            </button>
+          </div>
 
-          {!sellerPayment && !escrowSession && createOfferType === 'SELL' && (
-            <form className="stack-form publish-form deposit-start" onSubmit={handleStartSellerPayment}>
+          {createOfferType === 'SELL' && (
+            <form className="stack-form publish-form deposit-start" onSubmit={handlePublishSellOffer}>
               <label>
                 Cantidad de Nano a vender
                 <input
@@ -1166,14 +1096,14 @@ export function Nanopaquete() {
                   required
                 />
               </label>
-              <button className="primary-button create-offer-button" type="submit" disabled={loading === 'start-payment'}>
+              <button className="primary-button create-offer-button" type="submit" disabled={loading === 'publish-sell'}>
                 <Wallet size={18} />
                 Publicar venta
               </button>
             </form>
           )}
 
-          {!sellerPayment && !escrowSession && createOfferType === 'BUY' && (
+          {createOfferType === 'BUY' && (
             <form className="stack-form publish-form deposit-start" onSubmit={handlePublishBuyOffer}>
               <label>
                 Cantidad de Nano a comprar
@@ -1245,70 +1175,6 @@ export function Nanopaquete() {
             </form>
           )}
 
-          {sellerPayment && (
-            <div className="private-box payment-box">
-              <p className="eyebrow">Deposito de custodia</p>
-              <div className="payment-actions">
-                <button className="primary-button" type="button" onClick={() => openNanoPayment(sellerPayment.paymentUri)}>
-                  <Wallet size={18} />
-                  Pagar desde el movil
-                </button>
-                <button className="ghost-button" type="button" onClick={() => void copyValue(sellerPayment.receiverAddress)}>
-                  <Copy size={16} />
-                  Copiar wallet
-                </button>
-              </div>
-              <div className="payment-qr" aria-label="QR de pago Nano">
-                <QRCodeSVG value={sellerPayment.paymentUri} size={176} marginSize={2} />
-              </div>
-              <dl>
-                <dt>Wallet custodia</dt>
-                <dd>{sellerPayment.receiverAddress}</dd>
-                <dt>Monto a depositar</dt>
-                <dd>{sellerPayment.amountXno} XNO</dd>
-                <dt>Vence</dt>
-                <dd>{shortDate(sellerPayment.expiresAt)}</dd>
-                <dt>Contacto custodio</dt>
-                <dd>{sellerPayment.custodianContact}</dd>
-              </dl>
-              <button className="primary-button" type="button" onClick={handleVerifySellerPayment} disabled={loading === 'verify-payment'}>
-                Verificar deposito
-              </button>
-              <button className="ghost-button danger-button" type="button" onClick={handleCancelSellerPayment}>
-                <X size={16} />
-                Cancelar
-              </button>
-            </div>
-          )}
-
-          {escrowSession && (
-            <div className="private-box verified-box">
-              <p className="eyebrow">Deposito confirmado</p>
-              <div className="custodian-alert">
-                <span>Custodio para disputa y liberacion</span>
-                <strong>{escrowSession.custodianContact}</strong>
-                <button type="button" onClick={() => void copyValue(escrowSession.custodianContact)}>
-                  <Copy size={16} />
-                  Copiar
-                </button>
-                <p>Conserva este contacto. Si el comprador no paga o hay disputa, el custodio es quien puede mantener bloqueada, cancelar o liberar la publicacion con fondos.</p>
-              </div>
-              <dl>
-                <dt>Cantidad en venta</dt>
-                <dd>{escrowSession.amountXno} XNO</dd>
-                <dt>Wallet origen</dt>
-                <dd>{escrowSession.sellerWallet}</dd>
-                <dt>Hash deposito</dt>
-                <dd>{escrowSession.paymentHash}</dd>
-                <dt>Comision de liberacion</dt>
-                <dd>{escrowSession.custodyFeeXno} XNO</dd>
-              </dl>
-              <button className="primary-button" type="button" onClick={handleReturnToSellerForm}>
-                Ya he tomado la informacion, regresar al formulario
-              </button>
-            </div>
-          )}
-
         </div>
         )}
 
@@ -1366,24 +1232,33 @@ export function Nanopaquete() {
                       </div>
                     </form>
                   )}
-                  {offer.canConfirmPayment && (
+                  {offer.canDepositNano && (
                     <button
                       type="button"
                       onClick={() => void handleStartReleaseFee(offer.id)}
                       disabled={loading === `release-start:${offer.id}`}
                     >
-                      Confirmar pago
+                      Depositar Nano
+                    </button>
+                  )}
+                  {offer.canConfirmPayment && (
+                    <button
+                      type="button"
+                      onClick={() => void handleConfirmSellerPayment(offer.id)}
+                      disabled={loading === `confirm-payment:${offer.id}`}
+                    >
+                      Confirmar pago recibido
                     </button>
                   )}
                   {releaseFeeIntent?.offerId === offer.id && (
                     <div className="private-box release-fee-box inline-release-fee-box">
-                      <p className="eyebrow">Confirmar pago recibido</p>
-                      <h3>Paga {releaseFeeIntent.amountXno} XNO desde la wallet vendedora a la custodia.</h3>
-                      <p>Cuando la app detecte esa transferencia, la oferta pasara a estado liberando y el custodio podra enviar los fondos a la wallet registrada por el comprador.</p>
+                      <p className="eyebrow">Deposito de Nano</p>
+                      <h3>Deposita {releaseFeeIntent.amountXno} XNO en la custodia.</h3>
+                      <p>Cuando la app detecte esa transferencia, el comprador podra pagar con la tranquilidad de que los XNO estan en custodia.</p>
                       <div className="payment-actions">
                         <button className="primary-button" type="button" onClick={() => openNanoPayment(releaseFeeIntent.paymentUri)}>
                           <Wallet size={18} />
-                          Pagar comision
+                          Depositar Nano
                         </button>
                         <button className="ghost-button" type="button" onClick={() => void copyValue(releaseFeeIntent.receiverAddress)}>
                           <Copy size={16} />
@@ -1394,15 +1269,13 @@ export function Nanopaquete() {
                         <QRCodeSVG value={releaseFeeIntent.paymentUri} size={176} marginSize={2} />
                       </div>
                       <dl>
-                        <dt>Desde wallet</dt>
-                        <dd>{releaseFeeIntent.senderWallet}</dd>
                         <dt>Hacia custodia</dt>
                         <dd>{releaseFeeIntent.receiverAddress}</dd>
                         <dt>Monto</dt>
                         <dd>{releaseFeeIntent.amountXno} XNO</dd>
                       </dl>
                       <button className="primary-button" type="button" onClick={handleVerifyReleaseFee} disabled={loading === 'release-verify'}>
-                        Verificar comision
+                        Verificar deposito
                       </button>
                       <button className="ghost-button danger-button" type="button" onClick={() => setReleaseFeeIntent(null)}>
                         <X size={16} />
@@ -1557,13 +1430,18 @@ export function Nanopaquete() {
               {takenOffer.offer.status === 'RELEASING' ? (
                 <>
                   <h3>El vendedor ya confirmó que recibió el pago.</h3>
-                  <p>La liberación de los XNO está pendiente del custodio. Si se tarda, comunícate con el custodio para consultar el estado.</p>
+                  <p>La liberación de los XNO está pendiente de Nanopaquete. Si se tarda, comunícate con el administrador para consultar el estado.</p>
+                </>
+              ) : !takenOffer.offer.sellerDepositConfirmed ? (
+                <>
+                  <h3>La oferta fue tomada y el vendedor debe depositar los XNO.</h3>
+                  <p>Espera la confirmacion del deposito antes de enviar el pago externo. Usa el contacto del administrador si el proceso se queda detenido.</p>
                 </>
               ) : (
                 <>
                   <h3>Comunícate con el vendedor para acordar cómo harás el pago.</h3>
                   <p>Los XNO de esta oferta ya están bloqueados en custodia. El vendedor solo puede liberar a la cuenta que registraste cuando reciba el pago.</p>
-                  <p>Usa el contacto del custodio solo si ocurre un contratiempo que no puedas solucionar directamente con el vendedor.</p>
+                  <p>Usa el contacto del administrador solo si ocurre un contratiempo que no puedas solucionar directamente con el vendedor.</p>
                 </>
               )}
               <dl>
@@ -1575,12 +1453,12 @@ export function Nanopaquete() {
                     <dd>{takenOffer.sellerDialCode ? takenOffer.sellerDialCode + ' ' : ''}{takenOffer.sellerContact}</dd>
                   </>
                 )}
-                <dt>Contacto custodio</dt>
+                <dt>Contacto administrador</dt>
                 <dd>{takenOffer.custodianContact}</dd>
                 <dt>Oferta tomada</dt>
                 <dd>{takenOffer.offer.amountXno} XNO por {takenOffer.offer.price} {takenOffer.offer.currency}</dd>
               </dl>
-              {takenOffer.offer.status === 'NEGOTIATION' && (
+              {takenOffer.offer.status === 'NEGOTIATION' && !takenOffer.offer.sellerDepositConfirmed && (
                 <button
                   className="ghost-button danger-button"
                   type="button"

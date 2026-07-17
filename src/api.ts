@@ -61,8 +61,10 @@ export type PublicOffer = {
   createdAt: string
   isOwnOffer?: boolean
   canEditPrice?: boolean
+  canDepositNano?: boolean
   canConfirmPayment?: boolean
   canCustodianReleaseOffer?: boolean
+  sellerDepositConfirmed?: boolean
   sellerCountry?: string
   sellerDialCode?: string
   sellerContact?: string
@@ -97,13 +99,14 @@ export type EscrowSession = {
 }
 
 export type PublishOfferPayload = {
-  escrowId: string
-  publishToken: string
+  amountXno: string
   currency: Currency
   price: string
   sellerCountry: string
   sellerDialCode: string
   sellerContact: string
+  custodianId: string
+  clientSessionId: string
 }
 
 export type PublishBuyOfferPayload = {
@@ -264,6 +267,12 @@ export const startReleaseFee = (offerId: string, clientSessionId: string) =>
 
 export const verifyReleaseFee = (intentId: string, clientSessionId: string) =>
   requestJson<{ offer: PublicOffer; paymentHash?: string }>(`/release-intents/${encodeURIComponent(intentId)}/verify`, {
+    method: 'POST',
+    body: JSON.stringify({ clientSessionId }),
+  })
+
+export const confirmSellerPayment = (offerId: string, clientSessionId: string) =>
+  requestJson<{ offer: PublicOffer }>(`/offers/${encodeURIComponent(offerId)}/confirm-payment`, {
     method: 'POST',
     body: JSON.stringify({ clientSessionId }),
   })

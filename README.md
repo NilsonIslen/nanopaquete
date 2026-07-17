@@ -19,7 +19,7 @@ La plataforma no persigue el precio del mercado. Cada usuario define cuanta cant
 7. El vendedor recibe la notificacion, ve el boton y el QR de deposito, y deposita la cantidad publicada mas el 0,2% de comision de plataforma.
 8. Cuando el deposito queda confirmado, el vendedor ve el contacto del comprador y se le habilita el boton para confirmar el pago recibido.
 9. El comprador ve el contacto del vendedor y el mensaje de que los XNO estan en custodia para que pueda comunicarse y acordar el pago.
-10. Cuando el vendedor confirma que recibio el pago, Nanopaquete transfiere los XNO a la cuenta Nano registrada por el comprador. La comision queda disponible para retiro desde la pagina privada de Custodio.
+10. Cuando el vendedor confirma que recibio el pago, Nanopaquete transfiere los XNO a la cuenta Nano registrada por el comprador y cierra la negociacion.
 
 ### Publicar compra de Nano
 
@@ -29,13 +29,11 @@ La plataforma no persigue el precio del mercado. Cada usuario define cuanta cant
 4. Nanopaquete crea una cuenta Nano temporal para la custodia de esa negociacion, la guarda de forma segura en el servidor y habilita al vendedor el boton y el QR para depositar.
 5. El vendedor deposita la cantidad de XNO de la oferta mas el 0,2% de comision de plataforma.
 6. Cuando el deposito queda confirmado, Nanopaquete notifica al comprador y muestra los numeros de contacto para que ambas partes acuerden el pago.
-7. Cuando el comprador paga, el vendedor confirma la recepcion del pago y Nanopaquete libera los XNO a la cuenta Nano registrada por el comprador. La comision queda disponible para retiro desde la pagina privada de Custodio.
+7. Cuando el comprador paga, el vendedor confirma la recepcion del pago y Nanopaquete libera los XNO a la cuenta Nano registrada por el comprador.
 
-## Custodio
+## Disputas
 
-La custodia de XNO la administra Nanopaquete. La pagina privada de Custodio permite revisar negociaciones, ver los contactos de las dos partes en caso de disputa y retirar la comision disponible por cada operacion completada.
-
-La pagina de Custodio es una direccion privada para la persona autorizada. La navegacion publica muestra las ofertas, la creacion de ofertas, la descarga de wallet y la guia.
+Si aparece una disputa durante una negociacion, las partes deben conservar comprobantes y contactar al administrador de Nanopaquete al 3008188284.
 
 ## Comandos
 
