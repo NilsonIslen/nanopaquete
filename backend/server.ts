@@ -2255,7 +2255,7 @@ const handleAdmin = async (request: IncomingMessage, response: ServerResponse, u
     let withdrawal: Awaited<ReturnType<typeof sendFromPrivateKey>>
 
     try {
-      withdrawal = await sendFromPrivateKey({
+      withdrawal = await sendFromTemporaryAccountWithRetry({
         walletId: nanoWalletId,
         privateKey: decryptSecret(account.encryptedPrivateKey),
         sourceAccount: account.account,
