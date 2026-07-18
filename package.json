@@ -9,7 +9,9 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview --host 0.0.0.0 --port 4175",
-    "start:api": "tsx backend/server.ts"
+    "start:api": "tsx backend/server.ts",
+    "deploy:vps": "bash scripts/deploy-vps.sh",
+    "deploy:vps:ssh": "ssh nanopaquete-vps 'cd /root/nanopaquete && npm run deploy:vps'"
   },
   "dependencies": {
     "lucide-react": "^1.17.0",
