@@ -779,7 +779,6 @@ const takenOfferResponse = (store: Store, offer: OfferRecord, clientSessionId?: 
   buyerContact: offer.paymentHash ? offer.buyerContact ?? '' : '',
   buyerCountry: offer.paymentHash ? offer.buyerCountry : undefined,
   buyerDialCode: offer.paymentHash ? offer.buyerDialCode : undefined,
-  custodianContact: getCustodianById(store, offer.custodianId).contact,
 })
 
 const escrowSessionResponse = (store: Store, escrow: EscrowRecord) => {
@@ -793,7 +792,6 @@ const escrowSessionResponse = (store: Store, escrow: EscrowRecord) => {
   paymentHash: escrow.paymentHash,
   custodianId: custodian.id,
   custodianName: custodian.name,
-  custodianContact: custodian.contact,
   escrowWallet: custodian.wallet,
   custodyFeeXno: getCustodyFeeXno(escrow.amountXno),
 }
@@ -1406,7 +1404,6 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       expiresAt: intent.expiresAt,
       custodianId: custodian.id,
       custodianName: custodian.name,
-      custodianContact: custodian.contact,
     })
     return
   }
@@ -1561,7 +1558,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     store.offers.unshift(offer)
     await writeStore(store)
 
-    sendJson(response, 201, { offer: publicOffer(offer, { clientSessionId }), sellerPrivateCode: offer.sellerPrivateCode, custodianContact: custodian.contact, custodyFeeXno: getCustodyFeeXno(offer.amountXno) })
+    sendJson(response, 201, { offer: publicOffer(offer, { clientSessionId }), sellerPrivateCode: offer.sellerPrivateCode, custodyFeeXno: getCustodyFeeXno(offer.amountXno) })
     return
   }
 
@@ -1623,7 +1620,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
 
     store.offers.unshift(offer)
     await writeStore(store)
-    sendJson(response, 201, { offer: publicOffer(offer, { clientSessionId }), sellerPrivateCode: '', custodianContact: custodian.contact, custodyFeeXno: getCustodyFeeXno(offer.amountXno) })
+    sendJson(response, 201, { offer: publicOffer(offer, { clientSessionId }), sellerPrivateCode: '', custodyFeeXno: getCustodyFeeXno(offer.amountXno) })
     return
   }
 

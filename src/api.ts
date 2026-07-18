@@ -85,7 +85,6 @@ export type SellerPaymentIntent = {
   expiresAt: string
   custodianId: string
   custodianName: string
-  custodianContact: string
 }
 
 export type EscrowSession = {
@@ -96,7 +95,6 @@ export type EscrowSession = {
   paymentHash: string
   custodianId: string
   custodianName: string
-  custodianContact: string
   escrowWallet: string
   custodyFeeXno: string
 }
@@ -126,7 +124,6 @@ export type PublishBuyOfferPayload = {
 export type PublishedOffer = {
   offer: PublicOffer
   sellerPrivateCode: string
-  custodianContact: string
   custodyFeeXno: string
 }
 
@@ -146,7 +143,6 @@ export type TakenOffer = {
   buyerContact?: string
   buyerCountry?: string
   buyerDialCode?: string
-  custodianContact: string
 }
 
 export type CustodianAuthIntent = {

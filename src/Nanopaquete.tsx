@@ -1474,12 +1474,12 @@ export function Nanopaquete() {
               {takenOffer.offer.status === 'RELEASING' ? (
                 <>
                   <h3>El vendedor ya confirmó que recibió el pago.</h3>
-                  <p>La liberación de los XNO está pendiente de Nanopaquete. Si se tarda, comunícate con el administrador para consultar el estado.</p>
+                  <p>La liberación de los XNO está pendiente de Nanopaquete. Si necesitas intervención, consulta la guía.</p>
                 </>
               ) : !takenOffer.offer.sellerDepositConfirmed && takenOffer.offer.offerType === 'SELL' ? (
                 <>
                   <h3>La oferta fue tomada y el vendedor debe depositar los XNO.</h3>
-                  <p>Espera la confirmación del depósito antes de enviar el pago externo. Usa el contacto del administrador si el proceso se queda detenido.</p>
+                  <p>Espera la confirmación del depósito antes de enviar el pago externo. Si el proceso se queda detenido, consulta la guía.</p>
                 </>
               ) : !takenOffer.offer.sellerDepositConfirmed ? (
                 <>
@@ -1490,7 +1490,7 @@ export function Nanopaquete() {
                 <>
                   <h3>{takenOffer.offer.offerType === 'BUY' ? 'Comunícate con el comprador para acordar el pago.' : 'Comunícate con el vendedor para acordar cómo harás el pago.'}</h3>
                   <p>{takenOffer.offer.offerType === 'BUY' ? 'Los XNO ya están bloqueados en custodia. Confirma el pago recibido cuando el comprador complete el pago externo.' : 'Los XNO de esta oferta ya están bloqueados en custodia. El vendedor solo puede liberar a la cuenta que registraste cuando reciba el pago.'}</p>
-                  <p>Usa el contacto del administrador solo si ocurre un contratiempo que no puedas solucionar directamente con la otra parte.</p>
+                  <p>Si ocurre un contratiempo que no puedas solucionar directamente con la otra parte, consulta la guía.</p>
                 </>
               )}
               <dl>
@@ -1506,8 +1506,6 @@ export function Nanopaquete() {
                     </dd>
                   </>
                 )}
-                <dt>Contacto administrador</dt>
-                <dd>{takenOffer.custodianContact}</dd>
                 <dt>Oferta tomada</dt>
                 <dd>{takenOffer.offer.amountXno} XNO por {takenOffer.offer.price} {takenOffer.offer.currency}</dd>
               </dl>
