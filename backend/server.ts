@@ -1139,59 +1139,47 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
 
     if (!custodianSession) {
       await writeStore(store)
-      sendJson(response, 403, { error: 'Autenticacion de custodio preautorizado requerida.' })
+      sendJson(response, 403, { error: 'Autenticacion autorizada requerida.' })
       return
     }
 
     await writeStore(store)
-    sendJson(response, 200, { custodians: getStoreCustodians(store), canManage: isLeaderSession(store, custodianSession) })
+    sendJson(response, 200, { custodians: getStoreCustodians(store), canManage: true })
     return
   }
 
   if (request.method === 'POST' && url.pathname === '/api/custodian-admin/custodians') {
     const body = await readJsonBody(request)
     const custodianSessionId = normalizeClientSessionId(body.custodianSessionId)
-    const name = normalizeText(body.name)
     const wallet = normalizeText(body.wallet)
-    const country = normalizeText(body.country)
-    const dialCode = normalizeText(body.dialCode)
-    const contact = normalizeText(body.contact)
     const store = await readStore()
     const custodianSession = getValidCustodianSession(store, custodianSessionId)
 
-    if (!isLeaderSession(store, custodianSession)) {
+    if (!custodianSession) {
       await writeStore(store)
-      sendJson(response, 403, { error: 'Solo el custodio lider puede agregar custodios.' })
+      sendJson(response, 403, { error: 'Autenticacion autorizada requerida.' })
       return
     }
 
-    if (!name || !country || !dialCode || !contact || !isNanoAddress(wallet)) {
+    if (!isNanoAddress(wallet)) {
       await writeStore(store)
-      sendJson(response, 400, { error: 'Ingresa nombre, wallet Nano valida, pais y contacto del custodio.' })
+      sendJson(response, 400, { error: 'Ingresa una direccion Nano valida.' })
       return
     }
 
     const existingCustodians = getStoreCustodians(store)
     if (existingCustodians.some((custodian) => custodian.wallet === wallet)) {
       await writeStore(store)
-      sendJson(response, 409, { error: 'Ya existe un custodio con esa wallet.' })
-      return
-    }
-
-    if (existingCustodians.some((custodian) => custodian.contact === contact)) {
-      await writeStore(store)
-      sendJson(response, 409, { error: 'Ya existe un custodio con ese contacto.' })
+      sendJson(response, 409, { error: 'Esa direccion Nano ya esta autorizada.' })
       return
     }
 
     const custodian: Custodian = {
-      id: createCustodianId(name),
-      name,
+      id: createCustodianId(wallet.slice(0, 16)),
+      name: 'Direccion autorizada',
       wallet,
-      country,
-      dialCode,
-      contact,
-      isLeader: Boolean(body.isLeader),
+      contact: wallet,
+      isLeader: false,
     }
     store.custodians = [...existingCustodians, custodian]
     await writeStore(store)
@@ -1209,9 +1197,9 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     const store = await readStore()
     const custodianSession = getValidCustodianSession(store, custodianSessionId)
 
-    if (!isLeaderSession(store, custodianSession)) {
+    if (!custodianSession) {
       await writeStore(store)
-      sendJson(response, 403, { error: 'Solo el custodio lider puede eliminar custodios.' })
+      sendJson(response, 403, { error: 'Autenticacion autorizada requerida.' })
       return
     }
 
@@ -1220,13 +1208,13 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
 
     if (!custodian) {
       await writeStore(store)
-      sendJson(response, 404, { error: 'Custodio no encontrado.' })
+      sendJson(response, 404, { error: 'Direccion autorizada no encontrada.' })
       return
     }
 
     if (custodian.isLeader && getLeaderCustodians(store).length <= 1) {
       await writeStore(store)
-      sendJson(response, 409, { error: 'Debe quedar al menos un custodio lider.' })
+      sendJson(response, 409, { error: 'No se puede eliminar la direccion base de autenticacion.' })
       return
     }
 
@@ -1237,7 +1225,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
 
     if (hasLinkedRecords) {
       await writeStore(store)
-      sendJson(response, 409, { error: 'No se puede eliminar un custodio con ofertas, custodias o depositos asociados.' })
+      sendJson(response, 409, { error: 'No se puede eliminar una direccion con ofertas, custodias o depositos asociados.' })
       return
     }
 
@@ -1255,40 +1243,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
   const updateCustodianMatch = url.pathname.match(/^\/api\/custodian-admin\/custodians\/([^/]+)$/)
 
   if (request.method === 'PATCH' && updateCustodianMatch) {
-    const custodianId = decodeURIComponent(updateCustodianMatch[1])
-    const body = await readJsonBody(request)
-    const custodianSessionId = normalizeClientSessionId(body.custodianSessionId)
-    const isLeader = Boolean(body.isLeader)
-    const store = await readStore()
-    const custodianSession = getValidCustodianSession(store, custodianSessionId)
-
-    if (!isLeaderSession(store, custodianSession)) {
-      await writeStore(store)
-      sendJson(response, 403, { error: 'Solo un custodio lider puede cambiar lideres.' })
-      return
-    }
-
-    const existingCustodians = getStoreCustodians(store)
-    const custodian = existingCustodians.find((item) => item.id === custodianId)
-
-    if (!custodian) {
-      await writeStore(store)
-      sendJson(response, 404, { error: 'Custodio no encontrado.' })
-      return
-    }
-
-    if (!isLeader && custodian.isLeader && existingCustodians.filter((item) => item.isLeader).length <= 1) {
-      await writeStore(store)
-      sendJson(response, 409, { error: 'Debe quedar al menos un custodio lider.' })
-      return
-    }
-
-    store.custodians = existingCustodians.map((item) =>
-      item.id === custodianId ? { ...item, isLeader } : item,
-    )
-    await writeStore(store)
-
-    sendJson(response, 200, { custodians: getStoreCustodians(store) })
+    sendJson(response, 410, { error: 'La gestion de lideres fue desactivada.' })
     return
   }
 
@@ -1348,7 +1303,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     const intent = store.custodianAuthIntents.find((item) => item.id === intentId)
 
     if (!intent) {
-      sendJson(response, 404, { error: 'Autenticacion de custodio no encontrada.' })
+      sendJson(response, 404, { error: 'Autenticacion autorizada no encontrada.' })
       return
     }
 
@@ -1363,7 +1318,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     if (!assignedLeader?.isLeader) {
       intent.status = 'EXPIRED'
       await writeStore(store)
-      sendJson(response, 410, { error: 'La autenticacion vencio porque el lider asignado ya no esta disponible. Inicia una nueva.' })
+      sendJson(response, 410, { error: 'La autenticacion vencio porque la direccion receptora ya no esta disponible. Inicia una nueva.' })
       return
     }
 
@@ -1378,7 +1333,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       const authenticatedCustodian = getCustodianByWallet(store, payment.senderWallet)
 
       if (!authenticatedCustodian) {
-        sendJson(response, 403, { error: 'Esta wallet no esta autorizada como custodio.' })
+        sendJson(response, 403, { error: 'Esta wallet no esta autorizada para ingresar.' })
         return
       }
 
@@ -1397,11 +1352,11 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       sendJson(
         response,
         200,
-        { sessionId: session.id, expiresAt: session.expiresAt, custodianId: authenticatedCustodian.id, custodianName: authenticatedCustodian.name, isLeader: isLeaderSession(store, session) },
+        { sessionId: session.id, expiresAt: session.expiresAt, custodianId: authenticatedCustodian.id, custodianName: 'Direccion autorizada', isLeader: true },
         { 'Set-Cookie': createCustodianSessionCookie(session) },
       )
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'No se pudo autenticar al custodio.'
+      const message = error instanceof Error ? error.message : 'No se pudo autenticar la direccion autorizada.'
       sendJson(response, 422, {
         error: message.replace('wallet vendedora', 'wallet de custodia preautorizada'),
       })

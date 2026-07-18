@@ -312,7 +312,7 @@ export const getManagedCustodians = (custodianSessionId: string) =>
     `/custodian-admin/custodians?custodianSessionId=${encodeURIComponent(custodianSessionId)}`,
   )
 
-export const addManagedCustodian = (payload: { custodianSessionId: string; name: string; wallet: string; country: string; dialCode: string; contact: string; isLeader: boolean }) =>
+export const addManagedCustodian = (payload: { custodianSessionId: string; wallet: string }) =>
   requestJson<{ custodian: ManagedCustodian; custodians: ManagedCustodian[] }>(
     '/custodian-admin/custodians',
     {
@@ -327,15 +327,6 @@ export const deleteManagedCustodian = (custodianId: string, custodianSessionId: 
     {
       method: 'DELETE',
       body: JSON.stringify({ custodianSessionId }),
-    },
-  )
-
-export const updateManagedCustodianLeader = (custodianId: string, custodianSessionId: string, isLeader: boolean) =>
-  requestJson<{ custodians: ManagedCustodian[] }>(
-    `/custodian-admin/custodians/${encodeURIComponent(custodianId)}`,
-    {
-      method: 'PATCH',
-      body: JSON.stringify({ custodianSessionId, isLeader }),
     },
   )
 

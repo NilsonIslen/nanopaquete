@@ -19,7 +19,6 @@ import {
   startReleaseFee,
   takeOffer,
   updateOfferPrice,
-  updateManagedCustodianLeader,
   verifyCustodianAuth,
   verifyCustodianRelease,
   verifyReleaseFee,
@@ -161,12 +160,7 @@ const initialBuyOfferForm = {
 }
 
 const initialCustodianForm = {
-  name: '',
   wallet: '',
-  country: 'Colombia',
-  dialCode: '+57',
-  contact: '',
-  isLeader: false,
 }
 
 const takenOfferStorageKey = 'nanopaquete:taken-offer'
@@ -304,9 +298,7 @@ export function Nanopaquete() {
   const displayedManagedCustodians = [...managedCustodians].sort((left, right) => {
     if (left.id === custodianSession?.custodianId) return -1
     if (right.id === custodianSession?.custodianId) return 1
-    if (left.isLeader && !right.isLeader) return -1
-    if (!left.isLeader && right.isLeader) return 1
-    return left.name.localeCompare(right.name, 'es')
+    return left.wallet.localeCompare(right.wallet, 'es')
   })
 
   const loadOffers = async () => {
@@ -342,7 +334,7 @@ export function Nanopaquete() {
       })
       .catch((requestError) => {
         if (!ignore) {
-          setError(requestError instanceof Error ? requestError.message : 'No se pudieron cargar los custodios.')
+          setError(requestError instanceof Error ? requestError.message : 'No se pudieron cargar las direcciones autorizadas.')
         }
       })
 
@@ -453,7 +445,7 @@ export function Nanopaquete() {
       })
       .catch((requestError) => {
         if (!ignore) {
-          setError(requestError instanceof Error ? requestError.message : 'No se pudo cargar la lista de custodios.')
+          setError(requestError instanceof Error ? requestError.message : 'No se pudo cargar la lista de direcciones autorizadas.')
         }
       })
 
@@ -474,7 +466,7 @@ export function Nanopaquete() {
     setBuyOfferForm((current) => ({ ...current, [field]: value }))
   }
 
-  const updateCustodianForm = (field: keyof typeof custodianForm, value: string | boolean) => {
+  const updateCustodianForm = (field: keyof typeof custodianForm, value: string) => {
     setCustodianForm((current) => ({ ...current, [field]: value }))
   }
 
@@ -487,18 +479,13 @@ export function Nanopaquete() {
     try {
       const response = await addManagedCustodian({
         custodianSessionId: custodianSession.sessionId,
-        name: custodianForm.name,
         wallet: custodianForm.wallet,
-        country: custodianForm.country,
-        dialCode: custodianForm.dialCode,
-        contact: `${custodianForm.dialCode} ${custodianForm.contact}`.trim(),
-        isLeader: custodianForm.isLeader,
       })
       setManagedCustodians(response.custodians)
       setCustodianForm(initialCustodianForm)
       await loadCustodians()
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'No se pudo agregar el custodio.')
+      setError(requestError instanceof Error ? requestError.message : 'No se pudo agregar la direccion autorizada.')
     } finally {
       setLoading(null)
     }
@@ -514,22 +501,7 @@ export function Nanopaquete() {
       setManagedCustodians(response.custodians)
       await loadCustodians()
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'No se pudo eliminar el custodio.')
-    } finally {
-      setLoading(null)
-    }
-  }
-
-  const handleToggleCustodianLeader = async (custodianId: string, isLeader: boolean) => {
-    if (!custodianSession || !canManageCustodians) return
-    setError(null)
-    setLoading(`custodian-leader:${custodianId}`)
-
-    try {
-      const response = await updateManagedCustodianLeader(custodianId, custodianSession.sessionId, isLeader)
-      setManagedCustodians(response.custodians)
-    } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'No se pudo actualizar el lider.')
+      setError(requestError instanceof Error ? requestError.message : 'No se pudo eliminar la direccion autorizada.')
     } finally {
       setLoading(null)
     }
@@ -707,7 +679,7 @@ export function Nanopaquete() {
 
     try {
       if (!custodianSession) {
-        setError('Autenticacion de custodio requerida.')
+        setError('Autenticacion autorizada requerida.')
         return
       }
       await verifyCustodianRelease(offerId, custodianSession.sessionId)
@@ -715,7 +687,7 @@ export function Nanopaquete() {
       setOffers((currentOffers) => currentOffers.filter((offer) => offer.id !== offerId))
       await loadOffers()
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'No se pudo validar la transferencia del custodio.')
+      setError(requestError instanceof Error ? requestError.message : 'No se pudo validar la transferencia autorizada.')
     } finally {
       setLoading(null)
     }
@@ -727,7 +699,7 @@ export function Nanopaquete() {
 
     try {
       if (!custodianSession) {
-        setError('Autenticacion de custodio requerida.')
+        setError('Autenticacion autorizada requerida.')
         return
       }
       await releaseExpiredTakenOffer(offerId, custodianSession.sessionId)
@@ -748,7 +720,7 @@ export function Nanopaquete() {
       const intent = await startCustodianAuth()
       setCustodianAuthIntent(intent)
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'No se pudo iniciar la autenticacion de custodio.')
+      setError(requestError instanceof Error ? requestError.message : 'No se pudo iniciar la autenticacion autorizada.')
     } finally {
       setLoading(null)
     }
@@ -765,7 +737,7 @@ export function Nanopaquete() {
       setCustodianAuthIntent(null)
       await loadOffers()
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : 'No se pudo validar la autenticacion de custodio.')
+      setError(requestError instanceof Error ? requestError.message : 'No se pudo validar la autenticacion autorizada.')
     } finally {
       setLoading(null)
     }
@@ -850,8 +822,8 @@ export function Nanopaquete() {
       {activeView === 'custodian-auth' && !custodianAuthIntent && (
         <section className="single-page-panel">
           <div className="panel">
-            <h2>Custodio</h2>
-            <p>Acceso solo para cuentas autorizadas.</p>
+            <h2>Acceso privado</h2>
+            <p>Ingreso solo con direccion Nano autorizada.</p>
             {custodianSession ? (
               <>
                 <div className="private-box custodian-admin-box">
@@ -870,34 +842,18 @@ export function Nanopaquete() {
                 {!!managedCustodians.length && (
                   <div className="private-box custodian-admin-box">
                     <div className="panel-heading">
-                      <h3>Custodio</h3>
+                      <h3>Direcciones autorizadas</h3>
                     </div>
                     <div className="custodian-list">
                       {displayedManagedCustodians.map((custodian) => (
                         <article className="custodian-list-item" key={custodian.id}>
                           <div>
-                            <strong>{custodian.name}</strong>
-                            <span>{custodian.country || 'Pais no informado'}</span>
-                            <span>{custodian.contact}</span>
+                            <strong>Direccion Nano</strong>
                             <small>{custodian.wallet}</small>
                           </div>
-                          {custodian.isLeader ? (
-                            <span className="offer-status-pill">Lider</span>
-                          ) : !canManageCustodians ? (
-                            <span className="offer-status-pill">Custodio</span>
-                          ) : (
-                            <span className="offer-status-pill">Custodio</span>
-                          )}
+                          <span className="offer-status-pill">Autorizada</span>
                           {canManageCustodians && (
                             <div className="custodian-row-actions">
-                              <button
-                                className="ghost-button"
-                                type="button"
-                                onClick={() => void handleToggleCustodianLeader(custodian.id, !custodian.isLeader)}
-                                disabled={loading === `custodian-leader:${custodian.id}`}
-                              >
-                                {custodian.isLeader ? 'Quitar lider' : 'Marcar lider'}
-                              </button>
                               <button
                                 className="ghost-button danger-button"
                                 type="button"
@@ -917,46 +873,15 @@ export function Nanopaquete() {
                 {canManageCustodians && (
                   <div className="private-box custodian-admin-box">
                     <div className="panel-heading">
-                      <h3>Agregar custodio</h3>
+                      <h3>Autorizar direccion Nano</h3>
                     </div>
                     <form className="stack-form custodian-admin-form" onSubmit={handleAddCustodian}>
                       <label>
-                        Nombre
-                        <input value={custodianForm.name} onChange={(event) => updateCustodianForm('name', event.target.value)} required />
-                      </label>
-                      <label>
-                        Wallet Nano
+                        Direccion Nano
                         <input value={custodianForm.wallet} onChange={(event) => updateCustodianForm('wallet', event.target.value)} required />
                       </label>
-                      <label>
-                        Pais
-                        <select
-                          value={custodianForm.country}
-                          onChange={(event) => {
-                            const selected = contactCountries.find((item) => item.country === event.target.value)
-                            updateCustodianForm('country', event.target.value)
-                            updateCustodianForm('dialCode', selected?.dialCode ?? '')
-                          }}
-                        >
-                          {contactCountries.map((item) => (
-                            <option key={item.country} value={item.country}>{item.country}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>
-                        Contacto
-                        <input value={custodianForm.contact} onChange={(event) => updateCustodianForm('contact', event.target.value)} required />
-                      </label>
-                      <label className="checkbox-row">
-                        <input
-                          type="checkbox"
-                          checked={custodianForm.isLeader}
-                          onChange={(event) => updateCustodianForm('isLeader', event.target.checked)}
-                        />
-                        Lider
-                      </label>
                       <button className="primary-button" type="submit" disabled={loading === 'custodian-add'}>
-                        Agregar custodio
+                        Autorizar direccion
                       </button>
                     </form>
                   </div>
@@ -979,7 +904,7 @@ export function Nanopaquete() {
       {activeView === 'custodian-auth' && custodianAuthIntent && (
         <section className="intro-band compact-intro-band auth-panel-band">
           <div className="private-box custodian-auth-box">
-            <p className="eyebrow">Acceso privado de custodia</p>
+            <p className="eyebrow">Acceso privado</p>
             <p>Transfiere {custodianAuthIntent.amountXno} XNO desde la cuenta Nano autorizada a la cuenta asignada por Nanopaquete.</p>
             <div className="payment-actions">
               <button className="primary-button" type="button" onClick={() => openNanoPayment(custodianAuthIntent.paymentUri)}>
@@ -991,7 +916,7 @@ export function Nanopaquete() {
                 Copiar wallet
               </button>
             </div>
-            <div className="payment-qr" aria-label="QR de autenticacion de custodio">
+            <div className="payment-qr" aria-label="QR de autenticacion autorizada">
               <QRCodeSVG value={custodianAuthIntent.paymentUri} size={176} marginSize={2} />
             </div>
             <div className="button-row">
@@ -1452,7 +1377,7 @@ export function Nanopaquete() {
                   {offer.canCustodianReleaseFunds && (
                     <div className="private-box custodian-release-box">
                       <span className="offer-status-pill">Liberando</span>
-                      <h3>Transferencia del custodio</h3>
+                      <h3>Transferencia autorizada</h3>
                       <p>Esta oferta ya fue confirmada por el vendedor. Nanopaquete enviara los fondos desde la cuenta temporal al comprador.</p>
                       <div className="payment-actions">
                             <button
