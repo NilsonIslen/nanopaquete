@@ -835,6 +835,7 @@ const renderAdmin = (offers: OfferRecord[]) => `<!doctype html>
       button { background: #206b3a; color: white; border-color: #206b3a; cursor: pointer; }
       .offer-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
       .danger { background: #a83434; border-color: #a83434; }
+      button:disabled { background: #d7ddd5; border-color: #c7cec5; color: #657064; cursor: not-allowed; }
       .muted { color: #657064; font-size: 13px; }
       .status { display: inline-flex; padding: 4px 8px; border-radius: 999px; background: #e7efe5; font-weight: 700; }
     </style>
@@ -889,7 +890,10 @@ const renderAdmin = (offers: OfferRecord[]) => `<!doctype html>
                   ? `<form method="post" action="/admin/offers/${encodeURIComponent(offer.id)}/delete" onsubmit="return confirm('Eliminar esta oferta cerrada del panel? Esta accion no borra cuentas Nano ni transacciones.');">
                       <button class="danger">Eliminar</button>
                     </form>`
-                  : '<span class="muted">Solo se puede eliminar cuando este Cancelada o Liberada.</span>'
+                  : `<form method="post" action="/admin/offers/${encodeURIComponent(offer.id)}/delete">
+                      <button class="danger" disabled>Eliminar</button>
+                      <span class="muted">Disponible cuando este Cancelada o Liberada.</span>
+                    </form>`
               }
             </div>
           </article>`,
