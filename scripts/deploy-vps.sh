@@ -34,7 +34,20 @@ systemctl reload nginx
 echo "Verificando servicios"
 systemctl is-active --quiet "$SERVICE_NAME"
 systemctl is-active --quiet nginx
-curl -fsS http://127.0.0.1:8789/api/health
+
+for attempt in {1..10}; do
+  if curl -fsS http://127.0.0.1:8789/api/health; then
+    printf '\n'
+    break
+  fi
+
+  if [ "$attempt" -eq 10 ]; then
+    echo "La API no respondio despues del reinicio."
+    exit 1
+  fi
+
+  sleep 1
+done
 printf '\n'
 
 echo "Despliegue completado"
