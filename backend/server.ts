@@ -909,13 +909,6 @@ const nanoAccountStatusLabel = (status: NanoAccountStatus) =>
     RETIRED: 'Retirada',
   })[status]
 
-const nanoAccountPurposeLabel = (purpose: NanoAccountRecord['purpose']) =>
-  ({
-    ESCROW: 'Custodia temporal',
-    COMMISSION: 'Comision',
-    RESERVE: 'Reserva',
-  })[purpose]
-
 const renderNanoAccountsAdmin = (accounts: NanoAccountRecord[], destinationWallet: string, message = '') => `<!doctype html>
 <html lang="es">
   <head>
@@ -964,12 +957,6 @@ const renderNanoAccountsAdmin = (accounts: NanoAccountRecord[], destinationWalle
             <input name="label" placeholder="Ej. custodia inicial" />
           </label>
           <label>
-            Uso
-            <select name="purpose">
-              ${nanoAccountPurposes.map((purpose) => `<option value="${purpose}">${nanoAccountPurposeLabel(purpose)}</option>`).join('')}
-            </select>
-          </label>
-          <label>
             Nota
             <input name="notes" placeholder="Nota interna opcional" />
           </label>
@@ -982,7 +969,6 @@ const renderNanoAccountsAdmin = (accounts: NanoAccountRecord[], destinationWalle
             <h2>${escapeHtml(account.label || account.id)}</h2>
             <dl>
               <dt>Estado</dt><dd><span class="status">${nanoAccountStatusLabel(account.status)}</span></dd>
-              <dt>Uso</dt><dd>${nanoAccountPurposeLabel(account.purpose)}</dd>
               <dt>Cuenta Nano</dt><dd>${escapeHtml(account.account)}</dd>
               <dt>Clave publica</dt><dd>${escapeHtml(account.publicKey)}</dd>
               <dt>Huella de clave</dt><dd>${escapeHtml(account.keyFingerprint)}</dd>
@@ -999,14 +985,6 @@ const renderNanoAccountsAdmin = (accounts: NanoAccountRecord[], destinationWalle
                 <select name="status">
                   ${nanoAccountStatuses
                     .map((status) => `<option value="${status}" ${status === account.status ? 'selected' : ''}>${nanoAccountStatusLabel(status)}</option>`)
-                    .join('')}
-                </select>
-              </label>
-              <label>
-                Uso
-                <select name="purpose">
-                  ${nanoAccountPurposes
-                    .map((purpose) => `<option value="${purpose}" ${purpose === account.purpose ? 'selected' : ''}>${nanoAccountPurposeLabel(purpose)}</option>`)
                     .join('')}
                 </select>
               </label>
@@ -1030,8 +1008,8 @@ const renderNanoAccountsAdmin = (accounts: NanoAccountRecord[], destinationWalle
             </form>
             <form method="post" action="/admin/nano-accounts/${encodeURIComponent(account.id)}/withdraw">
               <label>
-                Destino fijo
-                <input value="${escapeHtml(destinationWallet)}" readonly />
+                Wallet destino
+                <input name="destination" value="${escapeHtml(destinationWallet)}" required />
               </label>
               <label>
                 Monto
@@ -2160,17 +2138,11 @@ const handleAdmin = async (request: IncomingMessage, response: ServerResponse, u
 
   if (request.method === 'POST' && url.pathname === '/admin/nano-accounts/generate') {
     const form = await readFormBody(request)
-    const purpose = String(form.get('purpose') ?? 'ESCROW')
-
-    if (!nanoAccountPurposes.includes(purpose as NanoAccountRecord['purpose'])) {
-      sendJson(response, 400, { error: 'Uso de cuenta invalido.' })
-      return
-    }
 
     try {
       const account = await createNanoAccountRecord({
         label: normalizeText(form.get('label')),
-        purpose: purpose as NanoAccountRecord['purpose'],
+        purpose: 'ESCROW',
         notes: normalizeText(form.get('notes')),
       })
       store.nanoAccounts.unshift(account)
@@ -2189,15 +2161,9 @@ const handleAdmin = async (request: IncomingMessage, response: ServerResponse, u
     const accountId = decodeURIComponent(nanoAccountUpdateMatch[1])
     const form = await readFormBody(request)
     const status = String(form.get('status') ?? '')
-    const purpose = String(form.get('purpose') ?? '')
 
     if (!nanoAccountStatuses.includes(status as NanoAccountStatus)) {
       sendJson(response, 400, { error: 'Estado de cuenta invalido.' })
-      return
-    }
-
-    if (!nanoAccountPurposes.includes(purpose as NanoAccountRecord['purpose'])) {
-      sendJson(response, 400, { error: 'Uso de cuenta invalido.' })
       return
     }
 
@@ -2217,7 +2183,7 @@ const handleAdmin = async (request: IncomingMessage, response: ServerResponse, u
     }
 
     account.status = status as NanoAccountStatus
-    account.purpose = purpose as NanoAccountRecord['purpose']
+    account.purpose = 'ESCROW'
     account.label = normalizeText(form.get('label')) || undefined
     account.linkedOfferId = normalizeText(form.get('linkedOfferId')) || undefined
     account.commissionAvailableXno = commissionAvailableXno || '0'
@@ -2235,11 +2201,17 @@ const handleAdmin = async (request: IncomingMessage, response: ServerResponse, u
 
   if (request.method === 'POST' && nanoAccountWithdrawalMatch) {
     const accountId = decodeURIComponent(nanoAccountWithdrawalMatch[1])
+    const form = await readFormBody(request)
     const account = store.nanoAccounts.find((item) => item.id === accountId)
-    const destination = getActiveCustodian(store).wallet
+    const destination = normalizeText(form.get('destination'))
 
     if (!account) {
       sendJson(response, 404, { error: 'Cuenta Nano no encontrada.' })
+      return
+    }
+
+    if (!isNanoAddress(destination)) {
+      sendJson(response, 400, { error: 'Ingresa una wallet Nano destino valida.' })
       return
     }
 
