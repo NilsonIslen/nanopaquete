@@ -295,6 +295,19 @@ export function Nanopaquete() {
   const donationWallet = donationCustodian?.wallet ?? ''
   const donationPaymentUri = donationWallet ? `nano:${donationWallet}` : ''
   const takenOfferId = takenOffer?.offer.id
+  const takenOfferOtherParty = takenOffer?.offer.canConfirmPayment
+    ? {
+        role: 'comprador',
+        country: takenOffer.buyerCountry,
+        dialCode: takenOffer.buyerDialCode,
+        contact: takenOffer.buyerContact,
+      }
+    : {
+        role: 'vendedor',
+        country: takenOffer?.sellerCountry,
+        dialCode: takenOffer?.sellerDialCode,
+        contact: takenOffer?.sellerContact,
+      }
   const displayedManagedCustodians = [...managedCustodians].sort((left, right) => {
     if (left.id === custodianSession?.custodianId) return -1
     if (right.id === custodianSession?.custodianId) return 1
@@ -1473,8 +1486,8 @@ export function Nanopaquete() {
               <p className="eyebrow">{takenOffer.offer.status === 'RELEASING' ? 'Pago confirmado' : 'Negociación iniciada'}</p>
               {takenOffer.offer.status === 'RELEASING' ? (
                 <>
-                  <h3>El vendedor ya confirmó que recibió el pago.</h3>
-                  <p>La liberación de los XNO está pendiente de Nanopaquete. Si necesitas intervención, consulta la guía.</p>
+                  <h3>{takenOffer.offer.canConfirmPayment ? 'Confirmaste que recibiste el pago.' : 'El vendedor ya confirmó que recibió el pago.'}</h3>
+                  <p>Nanopaquete está trabajando para liberar los fondos al comprador. Si la red tarda, el sistema reintentará automáticamente; espera unos minutos antes de solicitar intervención.</p>
                 </>
               ) : !takenOffer.offer.sellerDepositConfirmed && takenOffer.offer.offerType === 'SELL' ? (
                 <>
@@ -1488,21 +1501,19 @@ export function Nanopaquete() {
                 </>
               ) : (
                 <>
-                  <h3>{takenOffer.offer.offerType === 'BUY' ? 'Comunícate con el comprador para acordar el pago.' : 'Comunícate con el vendedor para acordar cómo harás el pago.'}</h3>
-                  <p>{takenOffer.offer.offerType === 'BUY' ? 'Los XNO ya están bloqueados en custodia. Confirma el pago recibido cuando el comprador complete el pago externo.' : 'Los XNO de esta oferta ya están bloqueados en custodia. El vendedor solo puede liberar a la cuenta que registraste cuando reciba el pago.'}</p>
+                  <h3>Comunícate con el {takenOfferOtherParty.role} para acordar el pago.</h3>
+                  <p>{takenOffer.offer.canConfirmPayment ? 'Los XNO ya están bloqueados en custodia. Confirma el pago recibido cuando el comprador complete el pago externo.' : 'Los XNO de esta oferta ya están bloqueados en custodia. El vendedor solo puede liberar a la cuenta que registraste cuando reciba el pago.'}</p>
                   <p>Si ocurre un contratiempo que no puedas solucionar directamente con la otra parte, consulta la guía.</p>
                 </>
               )}
               <dl>
                 {takenOffer.offer.status === 'NEGOTIATION' && takenOffer.offer.sellerDepositConfirmed && (
                   <>
-                    <dt>{takenOffer.offer.offerType === 'BUY' ? 'Pais comprador' : 'Pais vendedor'}</dt>
-                    <dd>{takenOffer.offer.offerType === 'BUY' ? takenOffer.buyerCountry || 'No informado' : takenOffer.sellerCountry || 'No informado'}</dd>
-                    <dt>{takenOffer.offer.offerType === 'BUY' ? 'Contacto comprador' : 'Contacto vendedor'}</dt>
+                    <dt>Pais {takenOfferOtherParty.role}</dt>
+                    <dd>{takenOfferOtherParty.country || 'No informado'}</dd>
+                    <dt>Contacto {takenOfferOtherParty.role}</dt>
                     <dd>
-                      {takenOffer.offer.offerType === 'BUY'
-                        ? `${takenOffer.buyerDialCode ? takenOffer.buyerDialCode + ' ' : ''}${takenOffer.buyerContact}`
-                        : `${takenOffer.sellerDialCode ? takenOffer.sellerDialCode + ' ' : ''}${takenOffer.sellerContact}`}
+                      {`${takenOfferOtherParty.dialCode ? takenOfferOtherParty.dialCode + ' ' : ''}${takenOfferOtherParty.contact}`}
                     </dd>
                   </>
                 )}

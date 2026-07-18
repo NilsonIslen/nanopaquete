@@ -279,6 +279,7 @@ const releaseFeeTtlMs = Number(process.env.NANOPAQUETE_RELEASE_FEE_TTL_MS ?? 60 
 const custodianAuthTtlMs = Number(process.env.NANOPAQUETE_CUSTODIAN_AUTH_TTL_MS ?? 15 * 60 * 1000)
 const custodianSessionTtlMs = Number(process.env.NANOPAQUETE_CUSTODIAN_SESSION_TTL_MS ?? 12 * 60 * 60 * 1000)
 const takenOfferCustodianReleaseMs = Number(process.env.NANOPAQUETE_TAKEN_OFFER_RELEASE_MS ?? 24 * 60 * 60 * 1000)
+const releaseRetryIntervalMs = Number(process.env.NANOPAQUETE_RELEASE_RETRY_MS ?? 60 * 1000)
 const nanoAccountSecret = process.env.NANOPAQUETE_ACCOUNT_SECRET ?? adminPassword
 const nanoWalletId = process.env.NANO_WALLET_ID ?? ''
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -2107,7 +2108,11 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       } catch (error) {
         await writeStore(store)
         const message = error instanceof Error ? error.message : 'No se pudo liberar los fondos al comprador.'
-        sendJson(response, 422, { error: `${message} Se intento varias veces; vuelve a confirmar para reintentar.` })
+        sendJson(response, 202, {
+          offer: publicOffer(offer, { clientSessionId }),
+          pendingRelease: true,
+          message: `${message} El sistema seguira reintentando la liberacion automaticamente.`,
+        })
       }
     })
     return
@@ -2331,6 +2336,39 @@ const handleAdmin = async (request: IncomingMessage, response: ServerResponse, u
   sendJson(response, 404, { error: 'Ruta admin no encontrada.' })
 }
 
+let pendingReleaseRetryRunning = false
+
+const retryPendingReleases = async () => {
+  if (pendingReleaseRetryRunning) return
+  pendingReleaseRetryRunning = true
+
+  try {
+    const initialStore = await readStore()
+    const pendingOfferIds = initialStore.offers
+      .filter((offer) => offer.status === 'RELEASING' && !offer.custodianReleaseHash)
+      .map((offer) => offer.id)
+
+    for (const offerId of pendingOfferIds) {
+      await withOfferLock(offerId, async () => {
+        const store = await readStore()
+        const offer = store.offers.find((item) => item.id === offerId)
+        if (!offer || offer.status !== 'RELEASING' || offer.custodianReleaseHash) return
+
+        try {
+          const withdrawal = await releaseOfferFunds(store, offer)
+          await writeStore(store)
+          console.log(`Liberacion automatica completada para ${offer.id}: ${withdrawal.blockHash}`)
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'No se pudo liberar automaticamente.'
+          console.warn(`Liberacion automatica pendiente para ${offer.id}: ${message}`)
+        }
+      })
+    }
+  } finally {
+    pendingReleaseRetryRunning = false
+  }
+}
+
 const server = createServer(async (request, response) => {
   if (!request.url) {
     sendJson(response, 400, { error: 'Solicitud invalida.' })
@@ -2366,3 +2404,12 @@ const server = createServer(async (request, response) => {
 server.listen(port, '0.0.0.0', () => {
   console.log(`Nanopaquete API escuchando en http://0.0.0.0:${port}`)
 })
+
+if (Number.isFinite(releaseRetryIntervalMs) && releaseRetryIntervalMs > 0) {
+  setInterval(() => {
+    retryPendingReleases().catch((error) => {
+      const message = error instanceof Error ? error.message : 'Error desconocido'
+      console.warn(`No se pudo ejecutar el reintento automatico de liberaciones: ${message}`)
+    })
+  }, releaseRetryIntervalMs)
+}
