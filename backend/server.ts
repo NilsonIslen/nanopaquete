@@ -823,6 +823,8 @@ const renderAdmin = (offers: OfferRecord[]) => `<!doctype html>
     <style>
       body { margin: 0; font-family: Inter, system-ui, sans-serif; background: #f5f7f4; color: #172019; }
       header { padding: 24px 32px; background: #18241c; color: white; }
+      nav { display: flex; gap: 12px; margin-top: 12px; }
+      nav a { color: white; }
       main { padding: 24px 32px; display: grid; gap: 18px; }
       article { background: white; border: 1px solid #d8ded6; border-radius: 8px; padding: 18px; }
       dl { display: grid; grid-template-columns: 180px 1fr; gap: 8px 16px; margin: 0 0 16px; }
@@ -842,6 +844,11 @@ const renderAdmin = (offers: OfferRecord[]) => `<!doctype html>
     <header>
       <h1>Nanopaquete Admin</h1>
       <p>Panel manual de custodia, disputas y cierre de operaciones.</p>
+      <nav>
+        <a href="/?admin=1">Panel principal</a>
+        <a href="/admin/offers">Ofertas</a>
+        <a href="/admin/nano-accounts">Cuentas Nano</a>
+      </nav>
     </header>
     <main>
       ${offers
@@ -942,6 +949,7 @@ const renderNanoAccountsAdmin = (accounts: NanoAccountRecord[], destinationWalle
       <h1>Cuentas Nano</h1>
       <p>Generacion y administracion de cuentas de custodia para Nanopaquete.</p>
       <nav>
+        <a href="/?admin=1">Panel principal</a>
         <a href="/admin/offers">Ofertas</a>
         <a href="/admin/nano-accounts">Cuentas Nano</a>
       </nav>
