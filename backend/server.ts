@@ -833,6 +833,9 @@ const renderAdmin = (offers: OfferRecord[]) => `<!doctype html>
       form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
       select, input, button { min-height: 38px; border-radius: 6px; border: 1px solid #bfc9bd; padding: 0 10px; }
       button { background: #206b3a; color: white; border-color: #206b3a; cursor: pointer; }
+      .offer-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+      .danger { background: #a83434; border-color: #a83434; }
+      .muted { color: #657064; font-size: 13px; }
       .status { display: inline-flex; padding: 4px 8px; border-radius: 999px; background: #e7efe5; font-weight: 700; }
     </style>
   </head>
@@ -871,15 +874,24 @@ const renderAdmin = (offers: OfferRecord[]) => `<!doctype html>
               <dt>Hash liberacion custodia</dt><dd>${escapeHtml(offer.custodianReleaseHash)}</dd>
               <dt>Nota admin</dt><dd>${escapeHtml(offer.adminNote)}</dd>
             </dl>
-            <form method="post" action="/admin/offers/${encodeURIComponent(offer.id)}/status">
-              <select name="status">
-                ${(['ACTIVE', 'NEGOTIATION', 'RELEASING', 'DISPUTED', 'CANCELLED', 'RELEASED'] as OfferStatus[])
-                  .map((status) => `<option value="${status}" ${status === offer.status ? 'selected' : ''}>${statusLabel(status)}</option>`)
-                  .join('')}
-              </select>
-              <input name="adminNote" placeholder="Nota interna" value="${escapeHtml(offer.adminNote)}" />
-              <button>Actualizar</button>
-            </form>
+            <div class="offer-actions">
+              <form method="post" action="/admin/offers/${encodeURIComponent(offer.id)}/status">
+                <select name="status">
+                  ${(['ACTIVE', 'NEGOTIATION', 'RELEASING', 'DISPUTED', 'CANCELLED', 'RELEASED'] as OfferStatus[])
+                    .map((status) => `<option value="${status}" ${status === offer.status ? 'selected' : ''}>${statusLabel(status)}</option>`)
+                    .join('')}
+                </select>
+                <input name="adminNote" placeholder="Nota interna" value="${escapeHtml(offer.adminNote)}" />
+                <button>Actualizar</button>
+              </form>
+              ${
+                offer.status === 'CANCELLED' || offer.status === 'RELEASED'
+                  ? `<form method="post" action="/admin/offers/${encodeURIComponent(offer.id)}/delete" onsubmit="return confirm('Eliminar esta oferta cerrada del panel? Esta accion no borra cuentas Nano ni transacciones.');">
+                      <button class="danger">Eliminar</button>
+                    </form>`
+                  : '<span class="muted">Solo se puede eliminar cuando este Cancelada o Liberada.</span>'
+              }
+            </div>
           </article>`,
         )
         .join('') || '<article>No hay ofertas registradas.</article>'}
@@ -2349,6 +2361,31 @@ const handleAdmin = async (request: IncomingMessage, response: ServerResponse, u
     offer.adminNote = adminNote || undefined
     if (nextStatus === 'CANCELLED' || nextStatus === 'RELEASED') offer.closedAt = new Date().toISOString()
 
+    await writeStore(store)
+    response.writeHead(303, { Location: '/admin/offers', ...corsHeaders })
+    response.end()
+    return
+  }
+
+  const deleteOfferMatch = url.pathname.match(/^\/admin\/offers\/([^/]+)\/delete$/)
+
+  if (request.method === 'POST' && deleteOfferMatch) {
+    const offerId = decodeURIComponent(deleteOfferMatch[1])
+    const offerIndex = store.offers.findIndex((item) => item.id === offerId)
+
+    if (offerIndex === -1) {
+      sendJson(response, 404, { error: 'Oferta no encontrada.' })
+      return
+    }
+
+    const offer = store.offers[offerIndex]
+
+    if (offer.status !== 'CANCELLED' && offer.status !== 'RELEASED') {
+      sendJson(response, 409, { error: 'Solo se pueden eliminar ofertas canceladas o liberadas.' })
+      return
+    }
+
+    store.offers.splice(offerIndex, 1)
     await writeStore(store)
     response.writeHead(303, { Location: '/admin/offers', ...corsHeaders })
     response.end()
