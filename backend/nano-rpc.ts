@@ -6,6 +6,7 @@ const DEFAULT_NANO_RPC_URL = 'http://127.0.0.1:7076'
 const DEFAULT_NANO_WORK_URL = 'https://rainstorm.city/api'
 const NANO_RECEIVE_WORK_THRESHOLD = 'fffffe0000000000'
 const NANO_SEND_WORK_THRESHOLD = 'fffffff800000000'
+const allowLocalWorkGeneration = process.env.NANO_ALLOW_LOCAL_WORK === '1'
 const rpcCooldowns = new Map<string, number>()
 
 type RpcOptions = {
@@ -559,6 +560,10 @@ async function getWork(hashOrPublicKey: string, threshold: string) {
     if (externalWork) return externalWork
   } catch {
     // Fall through to local work generation.
+  }
+
+  if (!allowLocalWorkGeneration) {
+    throw new Error('No se pudo generar work Nano desde el nodo RPC ni desde el servidor de work configurado.')
   }
 
   const work = await nanocurrency.computeWork(hashOrPublicKey, { workThreshold: threshold })
