@@ -9,6 +9,7 @@ import {
   deleteManagedCustodian,
   getManagedCustodians,
   getOfferChat,
+  getPushConfig,
   getBuyerNegotiation,
   getCustodians,
   getOffers,
@@ -16,6 +17,7 @@ import {
   publishBuyOffer,
   publishOffer,
   releaseExpiredTakenOffer,
+  savePushSubscription,
   startCustodianAuth,
   startReleaseFee,
   sendOfferChatMessage,
@@ -190,6 +192,77 @@ const openNanoPayment = (paymentUri: string) => {
   window.location.href = paymentUri
 }
 
+const urlBase64ToUint8Array = (value: string) => {
+  const padding = '='.repeat((4 - (value.length % 4)) % 4)
+  const base64 = `${value}${padding}`.replace(/-/g, '+').replace(/_/g, '/')
+  const rawData = window.atob(base64)
+  const output = new Uint8Array(rawData.length)
+  for (let index = 0; index < rawData.length; index += 1) output[index] = rawData.charCodeAt(index)
+  return output
+}
+
+const registerPushNotifications = async (clientSessionId: string) => {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window) || !('Notification' in window)) return
+
+  const permission = Notification.permission === 'granted'
+    ? 'granted'
+    : await Notification.requestPermission().catch(() => 'denied' as NotificationPermission)
+  if (permission !== 'granted') return
+
+  const config = await getPushConfig().catch(() => null)
+  if (!config?.enabled || !config.publicKey) return
+
+  const registration = await navigator.serviceWorker.register('/service-worker.js')
+  const existingSubscription = await registration.pushManager.getSubscription()
+  const subscription = existingSubscription ?? await registration.pushManager.subscribe({
+    userVisibleOnly: true,
+    applicationServerKey: urlBase64ToUint8Array(config.publicKey),
+  })
+
+  await savePushSubscription({
+    clientSessionId,
+    subscription: subscription.toJSON(),
+  })
+}
+
+const playNotificationSound = () => {
+  const AudioContextConstructor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+  if (!AudioContextConstructor) return
+
+  try {
+    const audioContext = new AudioContextConstructor()
+    const oscillator = audioContext.createOscillator()
+    const gain = audioContext.createGain()
+    oscillator.type = 'sine'
+    oscillator.frequency.setValueAtTime(880, audioContext.currentTime)
+    oscillator.frequency.setValueAtTime(1174, audioContext.currentTime + 0.12)
+    gain.gain.setValueAtTime(0.0001, audioContext.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.18, audioContext.currentTime + 0.02)
+    gain.gain.exponentialRampToValueAtTime(0.0001, audioContext.currentTime + 0.36)
+    oscillator.connect(gain)
+    gain.connect(audioContext.destination)
+    oscillator.start()
+    oscillator.stop(audioContext.currentTime + 0.38)
+    oscillator.onended = () => void audioContext.close().catch(() => undefined)
+  } catch {
+    // Browsers can block audio until the user has interacted with the page.
+  }
+}
+
+const notifyLocally = (title: string, body: string) => {
+  playNotificationSound()
+  if (!('Notification' in window) || Notification.permission !== 'granted') return
+
+  try {
+    new Notification(title, {
+      body,
+      tag: 'nanopaquete-negotiation',
+    })
+  } catch {
+    // Some mobile browsers only support notifications through push/service workers.
+  }
+}
+
 const getAmountValue = (value: string) => {
   const parsed = Number(value.replace(',', '.'))
   return Number.isFinite(parsed) ? parsed : Number.MAX_SAFE_INTEGER
@@ -272,6 +345,8 @@ export function Nanopaquete() {
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [clientSessionId] = useState(getClientSessionId)
   const autoStartedDepositOffers = useRef(new Set<string>())
+  const knownOfferStates = useRef(new Map<string, Pick<PublicOffer, 'status' | 'sellerDepositConfirmed' | 'canUseChat' | 'isPublishedOffer'>>())
+  const hasLoadedOfferStates = useRef(false)
   const visibleOffers = takenOffer ? [takenOffer.offer] : sortOffers(offers, Boolean(custodianSession))
   const offerGroups = groupOffers(visibleOffers)
   const pendingDepositOfferId = visibleOffers.find((offer) => offer.canDepositNano)?.id
@@ -298,6 +373,25 @@ export function Nanopaquete() {
       setError(requestError instanceof Error ? requestError.message : 'No se pudieron cargar las ofertas.')
     } finally {
       setLoading(null)
+    }
+  }
+
+  const refreshParticipantState = async (options: { silent?: boolean } = {}) => {
+    if (!options.silent) setError(null)
+
+    try {
+      const [offersResponse, negotiationResponse] = await Promise.all([
+        getOffers(clientSessionId, custodianSession?.sessionId),
+        getBuyerNegotiation(clientSessionId),
+      ])
+      setOffers(offersResponse.offers)
+      setTakenOffer(negotiationResponse.negotiation)
+      return negotiationResponse.negotiation
+    } catch (requestError) {
+      if (!options.silent) {
+        setError(requestError instanceof Error ? requestError.message : 'No se pudieron cargar las ofertas.')
+      }
+      return null
     }
   }
 
@@ -350,16 +444,27 @@ export function Nanopaquete() {
   }, [clientSessionId, custodianSession?.sessionId])
 
   useEffect(() => {
-    if (!takenOfferId) return undefined
+    if (activeView !== 'offers' && !takenOfferId) return undefined
+
+    let ignore = false
+    const loadLatestState = () => {
+      Promise.all([getOffers(clientSessionId, custodianSession?.sessionId), getBuyerNegotiation(clientSessionId)])
+        .then(([offersResponse, negotiationResponse]) => {
+          if (ignore) return
+          setOffers(offersResponse.offers)
+          setTakenOffer(negotiationResponse.negotiation)
+        })
+        .catch(() => undefined)
+    }
 
     const interval = window.setInterval(() => {
-      getBuyerNegotiation(clientSessionId)
-        .then((response) => setTakenOffer(response.negotiation))
-        .catch(() => undefined)
-    }, 10000)
-
-    return () => window.clearInterval(interval)
-  }, [clientSessionId, takenOfferId])
+      loadLatestState()
+    }, 4000)
+    return () => {
+      ignore = true
+      window.clearInterval(interval)
+    }
+  }, [activeView, clientSessionId, custodianSession?.sessionId, takenOfferId])
 
   useEffect(() => {
     if (!takenOfferId || !takenOffer?.offer.canUseChat) {
@@ -383,18 +488,6 @@ export function Nanopaquete() {
       window.clearInterval(interval)
     }
   }, [clientSessionId, takenOffer?.offer.canUseChat, takenOfferId])
-
-  useEffect(() => {
-    if (takenOfferId || activeView !== 'offers') return undefined
-
-    const interval = window.setInterval(() => {
-      getOffers(clientSessionId, custodianSession?.sessionId)
-        .then((response) => setOffers(response.offers))
-        .catch(() => undefined)
-    }, 10000)
-
-    return () => window.clearInterval(interval)
-  }, [activeView, clientSessionId, custodianSession?.sessionId, takenOfferId])
 
   useEffect(() => {
     if (!pendingDepositOfferId) return undefined
@@ -422,6 +515,75 @@ export function Nanopaquete() {
       ignore = true
     }
   }, [clientSessionId, pendingDepositOfferId, releaseFeeIntent?.offerId])
+
+  useEffect(() => {
+    let started = false
+    const enableNotifications = () => {
+      if (started) return
+      started = true
+      void registerPushNotifications(clientSessionId).catch(() => undefined)
+    }
+
+    window.addEventListener('pointerdown', enableNotifications, { once: true })
+    window.addEventListener('keydown', enableNotifications, { once: true })
+
+    return () => {
+      window.removeEventListener('pointerdown', enableNotifications)
+      window.removeEventListener('keydown', enableNotifications)
+    }
+  }, [clientSessionId])
+
+  useEffect(() => {
+    const currentOffers = new Map<string, PublicOffer>()
+    offers.forEach((offer) => currentOffers.set(offer.id, offer))
+    if (takenOffer) currentOffers.set(takenOffer.offer.id, takenOffer.offer)
+
+    if (!hasLoadedOfferStates.current) {
+      currentOffers.forEach((offer) => {
+        knownOfferStates.current.set(offer.id, {
+          status: offer.status,
+          sellerDepositConfirmed: offer.sellerDepositConfirmed,
+          canUseChat: offer.canUseChat,
+          isPublishedOffer: offer.isPublishedOffer,
+        })
+      })
+      hasLoadedOfferStates.current = true
+      return
+    }
+
+    currentOffers.forEach((offer) => {
+      const previous = knownOfferStates.current.get(offer.id)
+      if (!previous) return
+
+      const wasAvailable = previous.status === 'ACTIVE'
+      const isTaken = ['QUEUED', 'NEGOTIATION'].includes(offer.status)
+      if (offer.isPublishedOffer && wasAvailable && isTaken && !offer.sellerDepositConfirmed) {
+        notifyLocally(
+          'Tomaron tu oferta',
+          `${offer.amountXno} XNO por ${offer.price} ${offer.currency}. Revisa Nanopaquete para continuar.`,
+        )
+      }
+
+      if (!previous.canUseChat && offer.canUseChat) {
+        notifyLocally(
+          'Chat habilitado',
+          `Ya se confirmo el deposito de ${offer.amountXno} XNO. Puedes coordinar el pago.`,
+        )
+      }
+    })
+
+    knownOfferStates.current = new Map(
+      Array.from(currentOffers.values()).map((offer) => [
+        offer.id,
+        {
+          status: offer.status,
+          sellerDepositConfirmed: offer.sellerDepositConfirmed,
+          canUseChat: offer.canUseChat,
+          isPublishedOffer: offer.isPublishedOffer,
+        },
+      ]),
+    )
+  }, [offers, takenOffer])
 
   useEffect(() => {
     if (takenOffer) {
@@ -677,7 +839,7 @@ export function Nanopaquete() {
     try {
       await verifyReleaseFee(releaseFeeIntent.id, clientSessionId)
       setReleaseFeeIntent(null)
-      await loadOffers()
+      await refreshParticipantState()
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'No se pudo validar el deposito.')
     } finally {

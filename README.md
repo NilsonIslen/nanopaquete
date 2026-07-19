@@ -53,9 +53,18 @@ npm run lint
 - `NANOPAQUETE_CUSTODIAN_CONTACT`: contacto publico del conciliador base para disputas.
 - `NANOPAQUETE_ACCOUNT_SECRET`: secreto usado para cifrar las claves privadas de las cuentas Nano generadas por el backend. En produccion debe ser una cadena larga y privada.
 - `NANOPAQUETE_ADMIN_PASSWORD`: clave usada solo como respaldo para derivar el cifrado si no se configura `NANOPAQUETE_ACCOUNT_SECRET`.
+- `NANOPAQUETE_VAPID_PUBLIC_KEY`: clave publica VAPID para notificaciones push.
+- `NANOPAQUETE_VAPID_PRIVATE_KEY`: clave privada VAPID para notificaciones push.
+- `NANOPAQUETE_VAPID_SUBJECT`: contacto VAPID, por ejemplo `mailto:admin@nanopaquete.com`.
 - `NANO_RPC_URL`: nodo Nano RPC, por defecto `http://127.0.0.1:7076`.
 - `NANO_RPC_FALLBACK_URLS`: nodos RPC alternos separados por coma.
 - `NANO_WALLET_ID`: wallet local del nodo Nano usada para importar temporalmente las claves cifradas y retirar fondos desde las cuentas generadas. El nodo debe permitir comandos de control.
+
+Para generar las claves VAPID:
+
+```bash
+npx web-push generate-vapid-keys
+```
 
 ## Pagina privada
 

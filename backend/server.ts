@@ -4,6 +4,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID }
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import webPush from 'web-push'
 import { createNanoAccount, findAnyIncomingPayment, findIncomingPaymentByAmount, isNanoAddress, nanoToRaw, sendFromPrivateKey } from './nano-rpc'
 
 const currencies = [
@@ -182,6 +183,15 @@ type NanoAccountWithdrawal = {
   note?: string
 }
 
+type PushSubscriptionRecord = {
+  id: string
+  clientSessionId: string
+  endpoint: string
+  subscription: webPush.PushSubscription
+  createdAt: string
+  updatedAt: string
+}
+
 type Store = {
   custodians: Custodian[]
   sellerPaymentIntents: SellerPaymentIntent[]
@@ -193,6 +203,7 @@ type Store = {
   chatMessages: ChatMessage[]
   usedPayments: UsedPayment[]
   nanoAccounts: NanoAccountRecord[]
+  pushSubscriptions: PushSubscriptionRecord[]
 }
 
 const port = Number(process.env.NANOPAQUETE_API_PORT ?? 8789)
@@ -298,9 +309,16 @@ const takenOfferCustodianReleaseMs = Number(process.env.NANOPAQUETE_TAKEN_OFFER_
 const releaseRetryIntervalMs = Number(process.env.NANOPAQUETE_RELEASE_RETRY_MS ?? 60 * 1000)
 const nanoAccountSecret = process.env.NANOPAQUETE_ACCOUNT_SECRET ?? adminPassword
 const nanoWalletId = process.env.NANO_WALLET_ID ?? ''
+const vapidPublicKey = process.env.NANOPAQUETE_VAPID_PUBLIC_KEY ?? ''
+const vapidPrivateKey = process.env.NANOPAQUETE_VAPID_PRIVATE_KEY ?? ''
+const vapidSubject = process.env.NANOPAQUETE_VAPID_SUBJECT ?? 'mailto:admin@nanopaquete.local'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const storePath = join(__dirname, 'data', 'nanopaquete.json')
 const offerOperationLocks = new Map<string, Promise<void>>()
+
+if (vapidPublicKey && vapidPrivateKey) {
+  webPush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey)
+}
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': process.env.NANOPAQUETE_ALLOWED_ORIGIN ?? '*',
@@ -445,6 +463,67 @@ const normalizeNanoAccounts = (value: unknown): NanoAccountRecord[] => {
     })
 }
 
+const normalizePushSubscriptions = (value: unknown): PushSubscriptionRecord[] => {
+  if (!Array.isArray(value)) return []
+
+  return value
+    .filter((item): item is Partial<PushSubscriptionRecord> => Boolean(item && typeof item === 'object'))
+    .filter((item) => Boolean(item.clientSessionId && item.endpoint && item.subscription))
+    .map((item) => ({
+      id: normalizeClientSessionId(item.id) || `psh_${randomUUID().replaceAll('-', '').slice(0, 18)}`,
+      clientSessionId: normalizeClientSessionId(item.clientSessionId),
+      endpoint: normalizeText(item.endpoint),
+      subscription: item.subscription as webPush.PushSubscription,
+      createdAt: normalizeText(item.createdAt) || new Date().toISOString(),
+      updatedAt: normalizeText(item.updatedAt) || new Date().toISOString(),
+    }))
+}
+
+const getPushSubscriptionEndpoint = (value: unknown) => {
+  if (!value || typeof value !== 'object') return ''
+  return normalizeText((value as { endpoint?: unknown }).endpoint)
+}
+
+const sendPushToSession = async (
+  store: Store,
+  clientSessionId: string | undefined,
+  payload: { title: string; body: string; url?: string },
+) => {
+  if (!vapidPublicKey || !vapidPrivateKey || !clientSessionId) return
+
+  const subscriptions = store.pushSubscriptions.filter((subscription) => subscription.clientSessionId === clientSessionId)
+  if (!subscriptions.length) return
+
+  const staleEndpoints = new Set<string>()
+  await Promise.all(
+    subscriptions.map(async (subscription) => {
+      try {
+        await webPush.sendNotification(subscription.subscription, JSON.stringify(payload))
+      } catch (error) {
+        const statusCode = typeof error === 'object' && error && 'statusCode' in error
+          ? Number((error as { statusCode?: unknown }).statusCode)
+          : 0
+        if (statusCode === 404 || statusCode === 410) staleEndpoints.add(subscription.endpoint)
+      }
+    }),
+  )
+
+  if (staleEndpoints.size) {
+    store.pushSubscriptions = store.pushSubscriptions.filter((subscription) => !staleEndpoints.has(subscription.endpoint))
+  }
+}
+
+const sendPushToOfferParticipants = async (
+  store: Store,
+  offer: OfferRecord,
+  payload: { title: string; body: string; url?: string },
+  excludeClientSessionId?: string,
+) => {
+  const sessionIds = [offer.sellerSessionId, offer.buyerSessionId]
+    .filter((sessionId): sessionId is string => Boolean(sessionId && sessionId !== excludeClientSessionId))
+  await Promise.all([...new Set(sessionIds)].map((sessionId) => sendPushToSession(store, sessionId, payload)))
+}
+
 const readStore = async (): Promise<Store> => {
   try {
     const content = await readFile(storePath, 'utf8')
@@ -461,15 +540,16 @@ const readStore = async (): Promise<Store> => {
       chatMessages: Array.isArray(parsed.chatMessages) ? parsed.chatMessages : [],
       usedPayments: Array.isArray(parsed.usedPayments) ? parsed.usedPayments : [],
       nanoAccounts: normalizeNanoAccounts(parsed.nanoAccounts),
+      pushSubscriptions: normalizePushSubscriptions(parsed.pushSubscriptions),
     }
   } catch {
-    return { custodians: sanitizeCustodians(getConfiguredCustodians()), sellerPaymentIntents: [], custodianAuthIntents: [], custodianSessions: [], releaseFeeIntents: [], escrows: [], offers: [], chatMessages: [], usedPayments: [], nanoAccounts: [] }
+    return { custodians: sanitizeCustodians(getConfiguredCustodians()), sellerPaymentIntents: [], custodianAuthIntents: [], custodianSessions: [], releaseFeeIntents: [], escrows: [], offers: [], chatMessages: [], usedPayments: [], nanoAccounts: [], pushSubscriptions: [] }
   }
 }
 
 const writeStore = async (store: Store) => {
   await mkdir(dirname(storePath), { recursive: true })
-  await writeFile(storePath, `${JSON.stringify({ ...store, custodians: sanitizeCustodians(store.custodians), nanoAccounts: normalizeNanoAccounts(store.nanoAccounts) }, null, 2)}\n`)
+  await writeFile(storePath, `${JSON.stringify({ ...store, custodians: sanitizeCustodians(store.custodians), nanoAccounts: normalizeNanoAccounts(store.nanoAccounts), pushSubscriptions: normalizePushSubscriptions(store.pushSubscriptions) }, null, 2)}\n`)
 }
 
 const withOfferLock = async <T>(offerId: string, operation: () => Promise<T>) => {
@@ -1226,6 +1306,67 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     return
   }
 
+  if (request.method === 'GET' && url.pathname === '/api/push-config') {
+    sendJson(response, 200, {
+      enabled: Boolean(vapidPublicKey && vapidPrivateKey),
+      publicKey: vapidPublicKey,
+    })
+    return
+  }
+
+  if (request.method === 'POST' && url.pathname === '/api/push-subscriptions') {
+    const body = await readJsonBody(request)
+    const clientSessionId = normalizeClientSessionId(body.clientSessionId)
+    const endpoint = getPushSubscriptionEndpoint(body.subscription)
+
+    if (!vapidPublicKey || !vapidPrivateKey) {
+      sendJson(response, 503, { error: 'Las notificaciones push no estan configuradas en el servidor.' })
+      return
+    }
+
+    if (!clientSessionId || !endpoint) {
+      sendJson(response, 400, { error: 'Suscripcion push invalida.' })
+      return
+    }
+
+    const store = await readStore()
+    const now = new Date().toISOString()
+    const existing = store.pushSubscriptions.find((subscription) => subscription.endpoint === endpoint)
+
+    if (existing) {
+      existing.clientSessionId = clientSessionId
+      existing.subscription = body.subscription as webPush.PushSubscription
+      existing.updatedAt = now
+    } else {
+      store.pushSubscriptions.push({
+        id: `psh_${randomUUID().replaceAll('-', '').slice(0, 18)}`,
+        clientSessionId,
+        endpoint,
+        subscription: body.subscription as webPush.PushSubscription,
+        createdAt: now,
+        updatedAt: now,
+      })
+    }
+
+    await writeStore(store)
+    sendJson(response, 201, { ok: true })
+    return
+  }
+
+  if (request.method === 'DELETE' && url.pathname === '/api/push-subscriptions') {
+    const body = await readJsonBody(request)
+    const clientSessionId = normalizeClientSessionId(body.clientSessionId)
+    const endpoint = normalizeText(body.endpoint)
+    const store = await readStore()
+    store.pushSubscriptions = store.pushSubscriptions.filter(
+      (subscription) =>
+        !(subscription.clientSessionId === clientSessionId && (!endpoint || subscription.endpoint === endpoint)),
+    )
+    await writeStore(store)
+    sendJson(response, 200, { ok: true })
+    return
+  }
+
   if (request.method === 'GET' && url.pathname === '/api/offers') {
     const clientSessionId = normalizeClientSessionId(url.searchParams.get('clientSessionId'))
     const custodianSessionId = normalizeClientSessionId(url.searchParams.get('custodianSessionId'))
@@ -1900,6 +2041,11 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     } else {
       await assignEscrowAccountToOffer(store, offer)
     }
+    await sendPushToSession(store, publisherSessionId, {
+      title: 'Tomaron tu oferta',
+      body: `${offer.amountXno} XNO por ${offer.price} ${offer.currency}. Revisa Nanopaquete para continuar.`,
+      url: '/',
+    })
     await writeStore(store)
 
     sendJson(response, 200, takenOfferResponse(store, offer, clientSessionId))
@@ -2200,6 +2346,16 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
         offer.sellerWallet = payment.senderWallet
         offer.paymentHash = payment.hash
         store.usedPayments.push({ hash: payment.hash, purpose: 'seller_deposit', createdAt: new Date().toISOString() })
+        await sendPushToOfferParticipants(
+          store,
+          offer,
+          {
+            title: 'Chat habilitado',
+            body: `Ya se confirmo el deposito de ${offer.amountXno} XNO. Puedes coordinar el pago.`,
+            url: '/',
+          },
+          clientSessionId,
+        )
         await writeStore(store)
         sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId, store }), paymentHash: payment.hash })
       } catch (error) {

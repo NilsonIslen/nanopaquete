@@ -185,6 +185,11 @@ export type ReleaseFeeIntent = {
   expiresAt: string
 }
 
+export type PushConfig = {
+  enabled: boolean
+  publicKey: string
+}
+
 async function requestJson<T>(path: string, options?: RequestInit): Promise<T> {
   let response: Response
 
@@ -210,6 +215,14 @@ async function requestJson<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const getCustodians = () => requestJson<{ custodians: CustodianOption[] }>('/custodians')
+
+export const getPushConfig = () => requestJson<PushConfig>('/push-config')
+
+export const savePushSubscription = (payload: { clientSessionId: string; subscription: PushSubscriptionJSON }) =>
+  requestJson<{ ok: boolean }>('/push-subscriptions', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
 
 export const getOffers = (clientSessionId: string, custodianSessionId?: string) => {
   const params = new URLSearchParams({ clientSessionId })
