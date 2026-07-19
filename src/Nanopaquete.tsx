@@ -604,6 +604,9 @@ export function Nanopaquete() {
       })
       setChatMessages(response.messages)
       setChatDraft('')
+      const negotiationResponse = await getBuyerNegotiation(clientSessionId)
+      setTakenOffer(negotiationResponse.negotiation)
+      await loadOffers()
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'No se pudo enviar el mensaje.')
     } finally {
@@ -683,6 +686,11 @@ export function Nanopaquete() {
   }
 
   const handleConfirmSellerPayment = async (offerId: string) => {
+    const confirmed = window.confirm(
+      'Confirmas que recibiste el pago a tu cuenta y aceptas liberar los fondos (XNO) a la cuenta del comprador?',
+    )
+    if (!confirmed) return
+
     setError(null)
     setLoading(`confirm-payment:${offerId}`)
 

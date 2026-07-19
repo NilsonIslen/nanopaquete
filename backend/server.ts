@@ -761,6 +761,15 @@ const activateReadyQueuedOffers = async (store: Store) => {
 const canUseOfferChat = (offer: OfferRecord, clientSessionId: string) =>
   Boolean(offer.paymentHash && isOfferParticipant(offer, clientSessionId) && ['NEGOTIATION', 'RELEASING'].includes(offer.status))
 
+const hasSellerUsedChat = (store: Store, offer: OfferRecord) =>
+  store.chatMessages.some(
+    (message) =>
+      message.offerId === offer.id &&
+      message.senderRole === 'seller' &&
+      Boolean(offer.sellerSessionId) &&
+      message.senderSessionId === offer.sellerSessionId,
+  )
+
 const getParticipantRole = (offer: OfferRecord, clientSessionId: string): ChatMessage['senderRole'] | undefined => {
   if (offer.sellerSessionId === clientSessionId) return 'seller'
   if (offer.buyerSessionId === clientSessionId) return 'buyer'
@@ -826,7 +835,7 @@ const publicOffer = (offer: OfferRecord, context: { clientSessionId?: string; cu
     canDeleteOffer: isPublisher && offer.status === 'ACTIVE',
     canDepositNano: isNanoSeller && offer.status === 'NEGOTIATION' && !offer.paymentHash,
     canConfirmPayment: isNanoSeller && Boolean(offer.paymentHash) && (
-      offer.status === 'NEGOTIATION' ||
+      (offer.status === 'NEGOTIATION' && Boolean(context.store && hasSellerUsedChat(context.store, offer))) ||
       (offer.status === 'RELEASING' && !offer.custodianReleaseHash)
     ),
     canCancelTake: (isPublisher || isTaker) && ['QUEUED', 'NEGOTIATION'].includes(offer.status) && !offer.paymentHash,
@@ -1790,7 +1799,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
 
     offer.price = price
     await writeStore(store)
-    sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId }) })
+    sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId, store }) })
     return
   }
 
@@ -1826,7 +1835,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     offer.status = 'CANCELLED'
     offer.closedAt = new Date().toISOString()
     await writeStore(store)
-    sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId }) })
+    sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId, store }) })
     return
   }
 
@@ -1945,7 +1954,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       await activateReadyQueuedOffers(store)
       await writeStore(store)
 
-      sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId }), refundHash })
+      sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId, store }), refundHash })
     })
     return
   }
@@ -1996,7 +2005,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     releaseTakenOffer(offer)
     await writeStore(store)
 
-    sendJson(response, 200, { offer: publicOffer(offer, { custodianSession }) })
+    sendJson(response, 200, { offer: publicOffer(offer, { custodianSession, store }) })
     return
   }
 
@@ -2095,7 +2104,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     }
 
     if (offer.status === 'RELEASED') {
-      sendJson(response, 200, { offer: publicOffer(offer, { custodianSession }), paymentHash: offer.custodianReleaseHash })
+      sendJson(response, 200, { offer: publicOffer(offer, { custodianSession, store }), paymentHash: offer.custodianReleaseHash })
       return
     }
 
@@ -2107,7 +2116,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     try {
       const withdrawal = await releaseOfferFunds(store, offer)
       await writeStore(store)
-      sendJson(response, 200, { offer: publicOffer(offer, { custodianSession }), paymentHash: withdrawal.blockHash })
+      sendJson(response, 200, { offer: publicOffer(offer, { custodianSession, store }), paymentHash: withdrawal.blockHash })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'No se pudo validar la liberacion del custodio.'
       sendJson(response, 422, {
@@ -2148,7 +2157,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       }
 
       if (offer.paymentHash) {
-        sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId }), paymentHash: offer.paymentHash })
+        sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId, store }), paymentHash: offer.paymentHash })
         return
       }
 
@@ -2192,7 +2201,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
         offer.paymentHash = payment.hash
         store.usedPayments.push({ hash: payment.hash, purpose: 'seller_deposit', createdAt: new Date().toISOString() })
         await writeStore(store)
-        sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId }), paymentHash: payment.hash })
+        sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId, store }), paymentHash: payment.hash })
       } catch (error) {
         sendJson(response, 422, {
           error: error instanceof Error ? error.message : 'No se pudo validar el deposito.',
@@ -2232,17 +2241,22 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
         return
       }
 
+      if (offer.status === 'NEGOTIATION' && !hasSellerUsedChat(store, offer)) {
+        sendJson(response, 409, { error: 'Antes de confirmar, escribe en el chat para coordinar la negociacion con el comprador.' })
+        return
+      }
+
       offer.status = 'RELEASING'
       offer.releaseRequestedAt = new Date().toISOString()
       try {
         const withdrawal = await releaseOfferFunds(store, offer)
         await writeStore(store)
-        sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId }), paymentHash: withdrawal.blockHash })
+        sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId, store }), paymentHash: withdrawal.blockHash })
       } catch (error) {
         await writeStore(store)
         const message = error instanceof Error ? error.message : 'No se pudo liberar los fondos al comprador.'
         sendJson(response, 202, {
-          offer: publicOffer(offer, { clientSessionId }),
+          offer: publicOffer(offer, { clientSessionId, store }),
           pendingRelease: true,
           message: `${message} El sistema seguira reintentando la liberacion automaticamente.`,
         })
