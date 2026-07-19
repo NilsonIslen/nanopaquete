@@ -61,7 +61,7 @@ npm run lint
 
 `/?admin=1` abre el acceso privado. Para entrar se debe autenticar una cuenta Nano autorizada como conciliador.
 
-`/admin/offers` permite revisar ofertas, negociaciones, chats y estados operativos.
+`/admin/offers` permite revisar ofertas, negociaciones, chats y estados operativos. Los conciliadores pueden escribir en el chat de una oferta cuando ya existe deposito Nano confirmado.
 
 `/admin/nano-accounts` permite generar cuentas Nano reales desde el nodo RPC, guardar la clave privada cifrada, administrar estado/uso/notas y retirar la comision disponible hacia la wallet de custodia predeterminada.
 

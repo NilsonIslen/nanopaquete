@@ -1479,7 +1479,16 @@ export function Nanopaquete() {
                 <section className="chat-box" aria-label="Chat de negociacion">
                   <div className="chat-messages">
                     {displayedChatMessages.map((message) => (
-                      <article className={`chat-message ${message.senderRole === 'seller' ? 'seller-message' : 'buyer-message'}`} key={message.id}>
+                      <article
+                        className={`chat-message ${
+                          message.senderRole === 'seller'
+                            ? 'seller-message'
+                            : message.senderRole === 'buyer'
+                              ? 'buyer-message'
+                              : 'conciliator-message'
+                        }`}
+                        key={message.id}
+                      >
                         <strong>{message.senderLabel}</strong>
                         <p>{message.body}</p>
                         <small>{shortDate(message.createdAt)}</small>

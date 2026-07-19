@@ -108,7 +108,8 @@ type ChatMessage = {
   id: string
   offerId: string
   senderSessionId: string
-  senderRole: 'seller' | 'buyer'
+  senderRole: 'seller' | 'buyer' | 'conciliator'
+  senderWallet?: string
   body: string
   createdAt: string
 }
@@ -771,9 +772,19 @@ const getWalletSuffix = (wallet: string | undefined) => {
   return normalized ? normalized.slice(-7) : 'wallet'
 }
 
-const getChatSenderLabel = (offer: OfferRecord, senderRole: ChatMessage['senderRole']) => {
-  const roleLabel = senderRole === 'seller' ? 'Vendedor' : 'Comprador'
-  const wallet = senderRole === 'seller' ? offer.sellerWallet : offer.buyerNanoAddress
+const getChatSenderLabel = (offer: OfferRecord, message: ChatMessage) => {
+  const roleLabel =
+    message.senderRole === 'seller'
+      ? 'Vendedor'
+      : message.senderRole === 'buyer'
+        ? 'Comprador'
+        : 'Conciliador'
+  const wallet =
+    message.senderRole === 'seller'
+      ? offer.sellerWallet
+      : message.senderRole === 'buyer'
+        ? offer.buyerNanoAddress
+        : message.senderWallet
   return `${roleLabel} ${getWalletSuffix(wallet)}`
 }
 
@@ -781,7 +792,7 @@ const publicChatMessage = (offer: OfferRecord, message: ChatMessage) => ({
   id: message.id,
   offerId: message.offerId,
   senderRole: message.senderRole,
-  senderLabel: getChatSenderLabel(offer, message.senderRole),
+  senderLabel: getChatSenderLabel(offer, message),
   body: message.body,
   createdAt: message.createdAt,
 })
@@ -903,7 +914,25 @@ const statusLabel = (status: OfferStatus) =>
     DISPUTED: 'En disputa',
   })[status]
 
-const renderAdmin = (offers: OfferRecord[]) => `<!doctype html>
+const canOfferUseConciliationChat = (offer: OfferRecord) =>
+  Boolean(offer.paymentHash && ['NEGOTIATION', 'RELEASING'].includes(offer.status))
+
+const renderAdminChatMessages = (store: Store, offer: OfferRecord) => {
+  const messages = store.chatMessages.filter((message) => message.offerId === offer.id)
+  return messages.length
+    ? messages
+        .map(
+          (message) => `<div class="chat-message ${message.senderRole}">
+            <strong>${escapeHtml(getChatSenderLabel(offer, message))}</strong>
+            <p>${escapeHtml(message.body)}</p>
+            <small>${escapeHtml(message.createdAt)}</small>
+          </div>`,
+        )
+        .join('')
+    : '<p class="muted">No hay mensajes en este chat.</p>'
+}
+
+const renderAdmin = (store: Store, custodianSession: CustodianSession) => `<!doctype html>
 <html lang="es">
   <head>
     <meta charset="utf-8" />
@@ -920,13 +949,20 @@ const renderAdmin = (offers: OfferRecord[]) => `<!doctype html>
       dt { color: #657064; }
       dd { margin: 0; overflow-wrap: anywhere; }
       form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-      select, input, button { min-height: 38px; border-radius: 6px; border: 1px solid #bfc9bd; padding: 0 10px; }
+      select, input, textarea, button { min-height: 38px; border-radius: 6px; border: 1px solid #bfc9bd; padding: 0 10px; font: inherit; }
+      textarea { min-height: 74px; padding: 10px; flex: 1 1 420px; }
       button { background: #206b3a; color: white; border-color: #206b3a; cursor: pointer; }
       .offer-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
       .danger { background: #a83434; border-color: #a83434; }
       button:disabled { background: #d7ddd5; border-color: #c7cec5; color: #657064; cursor: not-allowed; }
       .muted { color: #657064; font-size: 13px; }
       .status { display: inline-flex; padding: 4px 8px; border-radius: 999px; background: #e7efe5; font-weight: 700; }
+      .chat-box { display: grid; gap: 10px; border: 1px solid #d8ded6; border-radius: 8px; padding: 14px; margin: 14px 0; background: #fbfdf9; }
+      .chat-messages { display: grid; gap: 8px; max-height: 320px; overflow: auto; }
+      .chat-message { border: 1px solid #d8ded6; border-radius: 8px; padding: 10px; background: white; }
+      .chat-message.conciliator { border-color: #b7ca95; background: #f2f8e8; }
+      .chat-message p { margin: 6px 0; overflow-wrap: anywhere; }
+      .chat-form { display: flex; align-items: stretch; }
     </style>
   </head>
   <body>
@@ -936,11 +972,11 @@ const renderAdmin = (offers: OfferRecord[]) => `<!doctype html>
       <nav>
         <a href="/?admin=1">Panel principal</a>
         <a href="/admin/offers">Ofertas</a>
-        <a href="/admin/nano-accounts">Cuentas Nano</a>
+        ${isAdminSession(store, custodianSession) ? '<a href="/admin/nano-accounts">Cuentas Nano</a>' : ''}
       </nav>
     </header>
     <main>
-      ${offers
+      ${store.offers
         .map(
           (offer) => `<article>
             <h2>${escapeHtml(offer.amountXno)} XNO - ${escapeHtml(offer.price)} ${escapeHtml(offer.currency)}</h2>
@@ -951,16 +987,10 @@ const renderAdmin = (offers: OfferRecord[]) => `<!doctype html>
               <dt>Cuenta temporal</dt><dd>${escapeHtml(offer.escrowNanoAddress)}</dd>
               <dt>ID cuenta temporal</dt><dd>${escapeHtml(offer.escrowNanoAccountId)}</dd>
               <dt>Metodos de pago</dt><dd>${escapeHtml(offer.paymentMethods)}</dd>
-              <dt>Pais vendedor</dt><dd>${escapeHtml(offer.sellerCountry)}</dd>
-              <dt>Extension contacto</dt><dd>${escapeHtml(offer.sellerDialCode)}</dd>
-              <dt>Contacto vendedor</dt><dd>${escapeHtml(offer.sellerContact)}</dd>
               <dt>Codigo vendedor</dt><dd>${escapeHtml(offer.sellerPrivateCode)}</dd>
               <dt>Wallet vendedor</dt><dd>${escapeHtml(offer.sellerWallet)}</dd>
               <dt>Hash deposito</dt><dd>${escapeHtml(offer.paymentHash)}</dd>
               <dt>Wallet comprador</dt><dd>${escapeHtml(offer.buyerNanoAddress)}</dd>
-              <dt>Pais comprador</dt><dd>${escapeHtml(offer.buyerCountry)}</dd>
-              <dt>Extension comprador</dt><dd>${escapeHtml(offer.buyerDialCode)}</dd>
-              <dt>Contacto comprador</dt><dd>${escapeHtml(offer.buyerContact)}</dd>
               <dt>Sesion vendedor</dt><dd>${escapeHtml(offer.sellerSessionId)}</dd>
               <dt>Sesion comprador</dt><dd>${escapeHtml(offer.buyerSessionId)}</dd>
               <dt>Hash comision liberacion</dt><dd>${escapeHtml(offer.releaseFeeHash)}</dd>
@@ -970,6 +1000,18 @@ const renderAdmin = (offers: OfferRecord[]) => `<!doctype html>
               <dt>Hash liberacion custodia</dt><dd>${escapeHtml(offer.custodianReleaseHash)}</dd>
               <dt>Nota interna</dt><dd>${escapeHtml(offer.adminNote)}</dd>
             </dl>
+            ${
+              canOfferUseConciliationChat(offer)
+                ? `<section class="chat-box">
+                    <h3>Chat de conciliacion</h3>
+                    <div class="chat-messages">${renderAdminChatMessages(store, offer)}</div>
+                    <form class="chat-form" method="post" action="/admin/offers/${encodeURIComponent(offer.id)}/chat">
+                      <textarea name="body" placeholder="Escribe como conciliador" maxlength="1200" required></textarea>
+                      <button>Enviar</button>
+                    </form>
+                  </section>`
+                : '<p class="muted">El chat se habilita cuando hay deposito Nano confirmado.</p>'
+            }
             <div class="offer-actions">
               <form method="post" action="/admin/offers/${encodeURIComponent(offer.id)}/status">
                 <select name="status">
@@ -2306,7 +2348,7 @@ const handleAdmin = async (request: IncomingMessage, response: ServerResponse, u
   }
 
   if (request.method === 'GET' && url.pathname === '/admin/offers') {
-    sendHtml(response, 200, renderAdmin(store.offers))
+    sendHtml(response, 200, renderAdmin(store, custodianSession))
     return
   }
 
@@ -2460,6 +2502,45 @@ const handleAdmin = async (request: IncomingMessage, response: ServerResponse, u
   }
 
   const statusMatch = url.pathname.match(/^\/admin\/offers\/([^/]+)\/status$/)
+
+  const adminChatMatch = url.pathname.match(/^\/admin\/offers\/([^/]+)\/chat$/)
+
+  if (request.method === 'POST' && adminChatMatch) {
+    const offerId = decodeURIComponent(adminChatMatch[1])
+    const form = await readFormBody(request)
+    const body = normalizeText(form.get('body')).slice(0, 1200)
+    const offer = store.offers.find((item) => item.id === offerId)
+    const custodian = getCustodianById(store, custodianSession.custodianId)
+
+    if (!offer) {
+      sendJson(response, 404, { error: 'Oferta no encontrada.' })
+      return
+    }
+
+    if (!canOfferUseConciliationChat(offer)) {
+      sendJson(response, 409, { error: 'El chat se habilita cuando hay deposito Nano confirmado.' })
+      return
+    }
+
+    if (!body) {
+      sendJson(response, 400, { error: 'Escribe un mensaje para enviar.' })
+      return
+    }
+
+    store.chatMessages.push({
+      id: `msg_${randomUUID().replaceAll('-', '').slice(0, 18)}`,
+      offerId: offer.id,
+      senderSessionId: custodianSession.id,
+      senderRole: 'conciliator',
+      senderWallet: custodian.wallet,
+      body,
+      createdAt: new Date().toISOString(),
+    })
+    await writeStore(store)
+    response.writeHead(303, { Location: '/admin/offers', ...corsHeaders })
+    response.end()
+    return
+  }
 
   if (request.method === 'POST' && statusMatch) {
     const offerId = decodeURIComponent(statusMatch[1])

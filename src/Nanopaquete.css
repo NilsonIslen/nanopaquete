@@ -986,6 +986,12 @@ dd {
   border-color: #d4e2c3;
 }
 
+.conciliator-message {
+  justify-self: center;
+  background: #fff9e6;
+  border-color: #d9c37b;
+}
+
 .chat-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 44px;

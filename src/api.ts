@@ -147,7 +147,7 @@ export type TakenOffer = {
 export type ChatMessage = {
   id: string
   offerId: string
-  senderRole: 'seller' | 'buyer'
+  senderRole: 'seller' | 'buyer' | 'conciliator'
   senderLabel: string
   body: string
   createdAt: string
