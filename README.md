@@ -53,6 +53,9 @@ npm run lint
 - `NANOPAQUETE_CUSTODIAN_CONTACT`: contacto publico del conciliador base para disputas.
 - `NANOPAQUETE_ACCOUNT_SECRET`: secreto usado para cifrar las claves privadas de las cuentas Nano generadas por el backend. En produccion debe ser una cadena larga y privada.
 - `NANOPAQUETE_ADMIN_PASSWORD`: clave usada solo como respaldo para derivar el cifrado si no se configura `NANOPAQUETE_ACCOUNT_SECRET`.
+- `NANOPAQUETE_DB_PATH`: ruta de la base SQLite. Por defecto `backend/data/nanopaquete.sqlite`.
+- `NANOPAQUETE_BACKUP_DIR`: carpeta donde se guardan snapshots JSON automaticos del estado. Por defecto `backend/data/backups`.
+- `NANOPAQUETE_BACKUP_INTERVAL_MS`: intervalo minimo entre backups automaticos. Por defecto 15 minutos.
 - `NANOPAQUETE_VAPID_PUBLIC_KEY`: clave publica VAPID para notificaciones push.
 - `NANOPAQUETE_VAPID_PRIVATE_KEY`: clave privada VAPID para notificaciones push.
 - `NANOPAQUETE_VAPID_SUBJECT`: contacto VAPID, por ejemplo `mailto:admin@nanopaquete.com`.
@@ -71,6 +74,8 @@ npx web-push generate-vapid-keys
 `/?admin=1` abre el acceso privado. Para entrar se debe autenticar una cuenta Nano autorizada como conciliador.
 
 `/admin/offers` permite revisar ofertas, negociaciones, chats y estados operativos. Los conciliadores pueden escribir en el chat de una oferta cuando ya existe deposito Nano confirmado.
+
+`/admin/audit` muestra los ultimos eventos operativos: ofertas creadas o tomadas, depositos confirmados, liberaciones, cambios admin, mensajes y suscripciones push. La auditoria se guarda en SQLite.
 
 `/admin/nano-accounts` permite generar cuentas Nano reales desde el nodo RPC, guardar la clave privada cifrada, administrar estado/uso/notas y retirar la comision disponible hacia la wallet de custodia predeterminada.
 

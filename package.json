@@ -14,6 +14,7 @@
     "deploy:vps:ssh": "ssh nanopaquete-vps 'cd /root/nanopaquete && npm run deploy:vps'"
   },
   "dependencies": {
+    "better-sqlite3": "^12.11.1",
     "lucide-react": "^1.17.0",
     "nanocurrency": "^2.5.0",
     "qrcode.react": "^4.2.0",

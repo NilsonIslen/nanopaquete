@@ -4,6 +4,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID }
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import Database from 'better-sqlite3'
 import webPush from 'web-push'
 import { createNanoAccount, findAnyIncomingPayment, findIncomingPaymentByAmount, isNanoAddress, nanoToRaw, sendFromPrivateKey } from './nano-rpc'
 
@@ -192,6 +193,15 @@ type PushSubscriptionRecord = {
   updatedAt: string
 }
 
+type AuditEvent = {
+  id: string
+  eventType: string
+  offerId?: string
+  clientSessionId?: string
+  payload: Record<string, unknown>
+  createdAt: string
+}
+
 type Store = {
   custodians: Custodian[]
   sellerPaymentIntents: SellerPaymentIntent[]
@@ -314,7 +324,12 @@ const vapidPrivateKey = process.env.NANOPAQUETE_VAPID_PRIVATE_KEY ?? ''
 const vapidSubject = process.env.NANOPAQUETE_VAPID_SUBJECT ?? 'mailto:admin@nanopaquete.local'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const storePath = join(__dirname, 'data', 'nanopaquete.json')
+const dbPath = process.env.NANOPAQUETE_DB_PATH ?? join(__dirname, 'data', 'nanopaquete.sqlite')
+const backupDir = process.env.NANOPAQUETE_BACKUP_DIR ?? join(__dirname, 'data', 'backups')
+const backupIntervalMs = Number(process.env.NANOPAQUETE_BACKUP_INTERVAL_MS ?? 15 * 60 * 1000)
 const offerOperationLocks = new Map<string, Promise<void>>()
+let database: Database.Database | undefined
+let lastStoreBackupAt = 0
 
 if (vapidPublicKey && vapidPrivateKey) {
   webPush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey)
@@ -479,6 +494,34 @@ const normalizePushSubscriptions = (value: unknown): PushSubscriptionRecord[] =>
     }))
 }
 
+const createEmptyStore = (): Store => ({
+  custodians: sanitizeCustodians(getConfiguredCustodians()),
+  sellerPaymentIntents: [],
+  custodianAuthIntents: [],
+  custodianSessions: [],
+  releaseFeeIntents: [],
+  escrows: [],
+  offers: [],
+  chatMessages: [],
+  usedPayments: [],
+  nanoAccounts: [],
+  pushSubscriptions: [],
+})
+
+const normalizeStore = (value: Partial<Store> = {}): Store => ({
+  custodians: sanitizeCustodians(value.custodians ?? getConfiguredCustodians()),
+  sellerPaymentIntents: Array.isArray(value.sellerPaymentIntents) ? value.sellerPaymentIntents : [],
+  custodianAuthIntents: Array.isArray(value.custodianAuthIntents) ? value.custodianAuthIntents : [],
+  custodianSessions: Array.isArray(value.custodianSessions) ? value.custodianSessions : [],
+  releaseFeeIntents: Array.isArray(value.releaseFeeIntents) ? value.releaseFeeIntents : [],
+  escrows: Array.isArray(value.escrows) ? value.escrows : [],
+  offers: Array.isArray(value.offers) ? value.offers : [],
+  chatMessages: Array.isArray(value.chatMessages) ? value.chatMessages : [],
+  usedPayments: Array.isArray(value.usedPayments) ? value.usedPayments : [],
+  nanoAccounts: normalizeNanoAccounts(value.nanoAccounts),
+  pushSubscriptions: normalizePushSubscriptions(value.pushSubscriptions),
+})
+
 const getPushSubscriptionEndpoint = (value: unknown) => {
   if (!value || typeof value !== 'object') return ''
   return normalizeText((value as { endpoint?: unknown }).endpoint)
@@ -524,32 +567,132 @@ const sendPushToOfferParticipants = async (
   await Promise.all([...new Set(sessionIds)].map((sessionId) => sendPushToSession(store, sessionId, payload)))
 }
 
-const readStore = async (): Promise<Store> => {
+const getDatabase = () => {
+  if (database) return database
+
+  database = new Database(dbPath)
+  database.pragma('journal_mode = WAL')
+  database.pragma('foreign_keys = ON')
+  database.exec(`
+    CREATE TABLE IF NOT EXISTS app_state (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS audit_events (
+      id TEXT PRIMARY KEY,
+      event_type TEXT NOT NULL,
+      offer_id TEXT,
+      client_session_id TEXT,
+      payload TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS audit_events_offer_id_created_at_idx
+      ON audit_events (offer_id, created_at);
+  `)
+
+  return database
+}
+
+const readJsonStore = async () => {
   try {
     const content = await readFile(storePath, 'utf8')
-    const parsed = JSON.parse(content) as Partial<Store>
-
-    return {
-      custodians: sanitizeCustodians(parsed.custodians ?? getConfiguredCustodians()),
-      sellerPaymentIntents: Array.isArray(parsed.sellerPaymentIntents) ? parsed.sellerPaymentIntents : [],
-      custodianAuthIntents: Array.isArray(parsed.custodianAuthIntents) ? parsed.custodianAuthIntents : [],
-      custodianSessions: Array.isArray(parsed.custodianSessions) ? parsed.custodianSessions : [],
-      releaseFeeIntents: Array.isArray(parsed.releaseFeeIntents) ? parsed.releaseFeeIntents : [],
-      escrows: Array.isArray(parsed.escrows) ? parsed.escrows : [],
-      offers: Array.isArray(parsed.offers) ? parsed.offers : [],
-      chatMessages: Array.isArray(parsed.chatMessages) ? parsed.chatMessages : [],
-      usedPayments: Array.isArray(parsed.usedPayments) ? parsed.usedPayments : [],
-      nanoAccounts: normalizeNanoAccounts(parsed.nanoAccounts),
-      pushSubscriptions: normalizePushSubscriptions(parsed.pushSubscriptions),
-    }
+    return normalizeStore(JSON.parse(content) as Partial<Store>)
   } catch {
-    return { custodians: sanitizeCustodians(getConfiguredCustodians()), sellerPaymentIntents: [], custodianAuthIntents: [], custodianSessions: [], releaseFeeIntents: [], escrows: [], offers: [], chatMessages: [], usedPayments: [], nanoAccounts: [], pushSubscriptions: [] }
+    return null
   }
 }
 
+const readStore = async (): Promise<Store> => {
+  await mkdir(dirname(dbPath), { recursive: true })
+  const db = getDatabase()
+  const row = db.prepare('SELECT value FROM app_state WHERE key = ?').get('store') as { value: string } | undefined
+
+  if (row) {
+    return normalizeStore(JSON.parse(row.value) as Partial<Store>)
+  }
+
+  const migratedStore = await readJsonStore()
+  const store = migratedStore ?? createEmptyStore()
+  const now = new Date().toISOString()
+  db.prepare('INSERT INTO app_state (key, value, updated_at) VALUES (?, ?, ?)').run('store', JSON.stringify(store), now)
+
+  if (migratedStore) {
+    db.prepare('INSERT INTO audit_events (id, event_type, payload, created_at) VALUES (?, ?, ?, ?)').run(
+      `aud_${randomUUID().replaceAll('-', '').slice(0, 18)}`,
+      'store_migrated_from_json',
+      JSON.stringify({ storePath }),
+      now,
+    )
+  }
+
+  return store
+}
+
+const maybeBackupStore = async (store: Store) => {
+  if (backupIntervalMs <= 0) return
+  const now = Date.now()
+  if (now - lastStoreBackupAt < backupIntervalMs) return
+
+  lastStoreBackupAt = now
+  await mkdir(backupDir, { recursive: true })
+  const timestamp = new Date(now).toISOString().replace(/[:.]/g, '-')
+  await writeFile(join(backupDir, `nanopaquete-${timestamp}.json`), `${JSON.stringify(store, null, 2)}\n`)
+}
+
 const writeStore = async (store: Store) => {
-  await mkdir(dirname(storePath), { recursive: true })
-  await writeFile(storePath, `${JSON.stringify({ ...store, custodians: sanitizeCustodians(store.custodians), nanoAccounts: normalizeNanoAccounts(store.nanoAccounts), pushSubscriptions: normalizePushSubscriptions(store.pushSubscriptions) }, null, 2)}\n`)
+  await mkdir(dirname(dbPath), { recursive: true })
+  const normalizedStore = normalizeStore(store)
+  getDatabase()
+    .prepare(`
+      INSERT INTO app_state (key, value, updated_at)
+      VALUES (?, ?, ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+    `)
+    .run('store', JSON.stringify(normalizedStore), new Date().toISOString())
+  await maybeBackupStore(normalizedStore)
+}
+
+const recordAuditEvent = async (
+  eventType: string,
+  payload: Record<string, unknown>,
+  options: { offerId?: string; clientSessionId?: string } = {},
+) => {
+  await mkdir(dirname(dbPath), { recursive: true })
+  getDatabase()
+    .prepare(`
+      INSERT INTO audit_events (id, event_type, offer_id, client_session_id, payload, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `)
+    .run(
+      `aud_${randomUUID().replaceAll('-', '').slice(0, 18)}`,
+      eventType,
+      options.offerId ?? null,
+      options.clientSessionId ?? null,
+      JSON.stringify(payload),
+      new Date().toISOString(),
+    )
+}
+
+const readAuditEvents = (limit = 120): AuditEvent[] => {
+  const rows = getDatabase()
+    .prepare(`
+      SELECT id, event_type as eventType, offer_id as offerId, client_session_id as clientSessionId, payload, created_at as createdAt
+      FROM audit_events
+      ORDER BY created_at DESC
+      LIMIT ?
+    `)
+    .all(Math.max(1, Math.min(limit, 500))) as Array<Omit<AuditEvent, 'payload'> & { payload: string }>
+
+  return rows.map((row) => {
+    try {
+      return { ...row, payload: JSON.parse(row.payload) as Record<string, unknown> }
+    } catch {
+      return { ...row, payload: {} }
+    }
+  })
 }
 
 const withOfferLock = async <T>(offerId: string, operation: () => Promise<T>) => {
@@ -1061,6 +1204,7 @@ const renderAdmin = (store: Store, custodianSession: CustodianSession) => `<!doc
       <nav>
         <a href="/?admin=1">Panel principal</a>
         <a href="/admin/offers">Ofertas</a>
+        <a href="/admin/audit">Auditoria</a>
         ${isAdminSession(store, custodianSession) ? '<a href="/admin/nano-accounts">Cuentas Nano</a>' : ''}
       </nav>
     </header>
@@ -1172,6 +1316,7 @@ const renderNanoAccountsAdmin = (accounts: NanoAccountRecord[], destinationWalle
       <nav>
         <a href="/?admin=1">Panel principal</a>
         <a href="/admin/offers">Ofertas</a>
+        <a href="/admin/audit">Auditoria</a>
         <a href="/admin/nano-accounts">Cuentas Nano</a>
       </nav>
     </header>
@@ -1271,6 +1416,60 @@ const renderNanoAccountsAdmin = (accounts: NanoAccountRecord[], destinationWalle
   </body>
 </html>`
 
+const renderAuditAdmin = (events: AuditEvent[], store: Store, custodianSession: CustodianSession) => `<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Auditoria - Nanopaquete</title>
+    <style>
+      body { margin: 0; font-family: Inter, system-ui, sans-serif; background: #f5f7f4; color: #172019; }
+      header { padding: 24px 32px; background: #18241c; color: white; }
+      nav { display: flex; gap: 12px; margin-top: 12px; }
+      nav a { color: white; }
+      main { padding: 24px 32px; display: grid; gap: 14px; }
+      article { background: white; border: 1px solid #d8ded6; border-radius: 8px; padding: 16px; }
+      dl { display: grid; grid-template-columns: 160px 1fr; gap: 7px 14px; margin: 0; }
+      dt { color: #657064; }
+      dd { margin: 0; overflow-wrap: anywhere; }
+      code { white-space: pre-wrap; overflow-wrap: anywhere; }
+      .event-type { display: inline-flex; padding: 4px 8px; border-radius: 999px; background: #e7efe5; font-weight: 700; }
+      .muted { color: #657064; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>Auditoria</h1>
+      <p>Ultimos eventos operativos registrados por Nanopaquete.</p>
+      <nav>
+        <a href="/?admin=1">Panel principal</a>
+        <a href="/admin/offers">Ofertas</a>
+        <a href="/admin/audit">Auditoria</a>
+        ${isAdminSession(store, custodianSession) ? '<a href="/admin/nano-accounts">Cuentas Nano</a>' : ''}
+      </nav>
+    </header>
+    <main>
+      ${
+        events.length
+          ? events
+              .map(
+                (event) => `<article>
+                  <dl>
+                    <dt>Evento</dt><dd><span class="event-type">${escapeHtml(event.eventType)}</span></dd>
+                    <dt>Fecha</dt><dd>${escapeHtml(event.createdAt)}</dd>
+                    <dt>Oferta</dt><dd>${escapeHtml(event.offerId)}</dd>
+                    <dt>Sesion</dt><dd>${escapeHtml(event.clientSessionId)}</dd>
+                    <dt>Datos</dt><dd><code>${escapeHtml(JSON.stringify(event.payload, null, 2))}</code></dd>
+                  </dl>
+                </article>`,
+              )
+              .join('')
+          : '<article class="muted">Todavia no hay eventos de auditoria.</article>'
+      }
+    </main>
+  </body>
+</html>`
+
 const createNanoAccountRecord = async ({
   label,
   purpose,
@@ -1337,6 +1536,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       existing.clientSessionId = clientSessionId
       existing.subscription = body.subscription as webPush.PushSubscription
       existing.updatedAt = now
+      await recordAuditEvent('push_subscription_updated', { endpoint }, { clientSessionId })
     } else {
       store.pushSubscriptions.push({
         id: `psh_${randomUUID().replaceAll('-', '').slice(0, 18)}`,
@@ -1346,6 +1546,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
         createdAt: now,
         updatedAt: now,
       })
+      await recordAuditEvent('push_subscription_created', { endpoint }, { clientSessionId })
     }
 
     await writeStore(store)
@@ -1362,6 +1563,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       (subscription) =>
         !(subscription.clientSessionId === clientSessionId && (!endpoint || subscription.endpoint === endpoint)),
     )
+    await recordAuditEvent('push_subscription_deleted', { endpoint: endpoint || 'all' }, { clientSessionId })
     await writeStore(store)
     sendJson(response, 200, { ok: true })
     return
@@ -1838,6 +2040,11 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     }
 
     store.offers.unshift(offer)
+    await recordAuditEvent(
+      'offer_created',
+      { offerType: offer.offerType, amountXno: offer.amountXno, currency: offer.currency, price: offer.price },
+      { offerId: offer.id, clientSessionId },
+    )
     await writeStore(store)
 
     sendJson(response, 201, { offer: publicOffer(offer, { clientSessionId, store }), sellerPrivateCode: offer.sellerPrivateCode, custodyFeeXno: getCustodyFeeXno(offer.amountXno) })
@@ -1897,6 +2104,11 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     }
 
     store.offers.unshift(offer)
+    await recordAuditEvent(
+      'offer_created',
+      { offerType: offer.offerType, amountXno: offer.amountXno, currency: offer.currency, price: offer.price },
+      { offerId: offer.id, clientSessionId },
+    )
     await writeStore(store)
     sendJson(response, 201, { offer: publicOffer(offer, { clientSessionId, store }), sellerPrivateCode: '', custodyFeeXno: getCustodyFeeXno(offer.amountXno) })
     return
@@ -1939,6 +2151,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     }
 
     offer.price = price
+    await recordAuditEvent('offer_price_updated', { price }, { offerId: offer.id, clientSessionId })
     await writeStore(store)
     sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId, store }) })
     return
@@ -1975,6 +2188,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
 
     offer.status = 'CANCELLED'
     offer.closedAt = new Date().toISOString()
+    await recordAuditEvent('offer_cancelled', { reason: 'publisher_deleted_active_offer' }, { offerId: offer.id, clientSessionId })
     await writeStore(store)
     sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId, store }) })
     return
@@ -2046,6 +2260,11 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       body: `${offer.amountXno} XNO por ${offer.price} ${offer.currency}. Revisa Nanopaquete para continuar.`,
       url: '/',
     })
+    await recordAuditEvent(
+      'offer_taken',
+      { offerType, status: offer.status, publisherSessionId },
+      { offerId: offer.id, clientSessionId },
+    )
     await writeStore(store)
 
     sendJson(response, 200, takenOfferResponse(store, offer, clientSessionId))
@@ -2098,6 +2317,11 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       releaseUnusedEscrowAccount(store, offer)
       releaseTakenOffer(offer)
       await activateReadyQueuedOffers(store)
+      await recordAuditEvent(
+        'negotiation_cancelled',
+        { refundHash, status: offer.status },
+        { offerId: offer.id, clientSessionId },
+      )
       await writeStore(store)
 
       sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId, store }), refundHash })
@@ -2261,6 +2485,11 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
 
     try {
       const withdrawal = await releaseOfferFunds(store, offer)
+      await recordAuditEvent(
+        'custodian_release_verified',
+        { releaseHash: withdrawal.blockHash },
+        { offerId: offer.id, clientSessionId: custodianSession.id },
+      )
       await writeStore(store)
       sendJson(response, 200, { offer: publicOffer(offer, { custodianSession, store }), paymentHash: withdrawal.blockHash })
     } catch (error) {
@@ -2356,6 +2585,11 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
           },
           clientSessionId,
         )
+        await recordAuditEvent(
+          'seller_deposit_confirmed',
+          { paymentHash: payment.hash, senderWallet: payment.senderWallet, amountXno: intent.amountXno },
+          { offerId: offer.id, clientSessionId },
+        )
         await writeStore(store)
         sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId, store }), paymentHash: payment.hash })
       } catch (error) {
@@ -2406,9 +2640,19 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       offer.releaseRequestedAt = new Date().toISOString()
       try {
         const withdrawal = await releaseOfferFunds(store, offer)
+        await recordAuditEvent(
+          'seller_payment_confirmed_and_released',
+          { releaseHash: withdrawal.blockHash },
+          { offerId: offer.id, clientSessionId },
+        )
         await writeStore(store)
         sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId, store }), paymentHash: withdrawal.blockHash })
       } catch (error) {
+        await recordAuditEvent(
+          'seller_payment_confirmed_release_pending',
+          { message: error instanceof Error ? error.message : 'No se pudo liberar los fondos al comprador.' },
+          { offerId: offer.id, clientSessionId },
+        )
         await writeStore(store)
         const message = error instanceof Error ? error.message : 'No se pudo liberar los fondos al comprador.'
         sendJson(response, 202, {
@@ -2485,6 +2729,11 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       createdAt: new Date().toISOString(),
     }
     store.chatMessages.push(message)
+    await recordAuditEvent(
+      'chat_message_sent',
+      { senderRole: message.senderRole, messageId: message.id },
+      { offerId: offer.id, clientSessionId },
+    )
     await writeStore(store)
 
     sendJson(response, 201, {
@@ -2519,6 +2768,11 @@ const handleAdmin = async (request: IncomingMessage, response: ServerResponse, u
 
   if (request.method === 'GET' && url.pathname === '/admin/offers') {
     sendHtml(response, 200, renderAdmin(store, custodianSession))
+    return
+  }
+
+  if (request.method === 'GET' && url.pathname === '/admin/audit') {
+    sendHtml(response, 200, renderAuditAdmin(readAuditEvents(), store, custodianSession))
     return
   }
 
@@ -2706,6 +2960,11 @@ const handleAdmin = async (request: IncomingMessage, response: ServerResponse, u
       body,
       createdAt: new Date().toISOString(),
     })
+    await recordAuditEvent(
+      'admin_chat_message_sent',
+      { senderRole: 'conciliator', custodianId: custodianSession.custodianId },
+      { offerId: offer.id, clientSessionId: custodianSession.id },
+    )
     await writeStore(store)
     response.writeHead(303, { Location: '/admin/offers', ...corsHeaders })
     response.end()
@@ -2742,6 +3001,11 @@ const handleAdmin = async (request: IncomingMessage, response: ServerResponse, u
       await activateReadyQueuedOffers(store)
     }
 
+    await recordAuditEvent(
+      'admin_offer_status_updated',
+      { status: nextStatus, hasAdminNote: Boolean(adminNote) },
+      { offerId: offer.id, clientSessionId: custodianSession.id },
+    )
     await writeStore(store)
     response.writeHead(303, { Location: '/admin/offers', ...corsHeaders })
     response.end()
@@ -2767,6 +3031,11 @@ const handleAdmin = async (request: IncomingMessage, response: ServerResponse, u
     }
 
     store.offers.splice(offerIndex, 1)
+    await recordAuditEvent(
+      'admin_offer_deleted',
+      { status: offer.status },
+      { offerId: offer.id, clientSessionId: custodianSession.id },
+    )
     await writeStore(store)
     response.writeHead(303, { Location: '/admin/offers', ...corsHeaders })
     response.end()
@@ -2796,6 +3065,11 @@ const retryPendingReleases = async () => {
 
         try {
           const withdrawal = await releaseOfferFunds(store, offer)
+          await recordAuditEvent(
+            'automatic_release_completed',
+            { releaseHash: withdrawal.blockHash },
+            { offerId: offer.id },
+          )
           await writeStore(store)
           console.log(`Liberacion automatica completada para ${offer.id}: ${withdrawal.blockHash}`)
         } catch (error) {
