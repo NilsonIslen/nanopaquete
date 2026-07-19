@@ -33,7 +33,7 @@ La plataforma no persigue el precio del mercado. Cada usuario define cuanta cant
 
 ## Disputas
 
-Si aparece una disputa durante una negociacion, las partes deben conservar comprobantes y contactar al administrador de Nanopaquete por Telegram: @nililen, o al numero +57 3008188284.
+Si aparece una disputa durante una negociacion, las partes deben conservar comprobantes y contactar a un conciliador de Nanopaquete. Los conciliadores son personas que autorizan mostrar sus datos para ayudar a resolver disputas.
 
 ## Comandos
 
@@ -50,7 +50,7 @@ npm run lint
 - `VITE_NANOPAQUETE_API_URL`: URL del backend. En local usa `http://localhost:8789/api`.
 - `NANOPAQUETE_API_PORT`: puerto API, por defecto `8789`.
 - `NANOPAQUETE_ESCROW_WALLET`: wallet Nano de custodia. Por defecto usa `nano_1j7csyciamkzktswyxey5yt6f1rg1zbw3rtioe7xdze4fekkbo7zxri3ijxd`.
-- `NANOPAQUETE_CUSTODIAN_CONTACT`: contacto privado para administracion de custodia. Por defecto usa `+573008188284`.
+- `NANOPAQUETE_CUSTODIAN_CONTACT`: contacto publico del conciliador base para disputas.
 - `NANOPAQUETE_ACCOUNT_SECRET`: secreto usado para cifrar las claves privadas de las cuentas Nano generadas por el backend. En produccion debe ser una cadena larga y privada.
 - `NANOPAQUETE_ADMIN_PASSWORD`: clave usada solo como respaldo para derivar el cifrado si no se configura `NANOPAQUETE_ACCOUNT_SECRET`.
 - `NANO_RPC_URL`: nodo Nano RPC, por defecto `http://127.0.0.1:7076`.
@@ -59,8 +59,8 @@ npm run lint
 
 ## Pagina privada
 
-`/?admin=1` abre el acceso privado. Para entrar se debe autenticar una cuenta Nano autorizada como custodio.
+`/?admin=1` abre el acceso privado. Para entrar se debe autenticar una cuenta Nano autorizada como conciliador.
 
-`/admin/offers` permite revisar ofertas, negociaciones, contactos de las partes y estados operativos.
+`/admin/offers` permite revisar ofertas, negociaciones, chats y estados operativos.
 
 `/admin/nano-accounts` permite generar cuentas Nano reales desde el nodo RPC, guardar la clave privada cifrada, administrar estado/uso/notas y retirar la comision disponible hacia la wallet de custodia predeterminada.

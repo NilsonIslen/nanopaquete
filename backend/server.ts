@@ -39,7 +39,7 @@ const currencies = [
 ] as const
 
 type Currency = (typeof currencies)[number]
-type OfferStatus = 'ACTIVE' | 'NEGOTIATION' | 'RELEASING' | 'RELEASED' | 'CANCELLED' | 'DISPUTED'
+type OfferStatus = 'ACTIVE' | 'QUEUED' | 'NEGOTIATION' | 'RELEASING' | 'RELEASED' | 'CANCELLED' | 'DISPUTED'
 type OfferType = 'SELL' | 'BUY'
 
 type SellerPaymentIntent = {
@@ -79,6 +79,7 @@ type OfferRecord = {
   amountXno: string
   currency: Currency
   price: string
+  paymentMethods?: string
   sellerContact?: string
   custodianId: string
   sellerCountry?: string
@@ -101,6 +102,15 @@ type OfferRecord = {
   custodianReleaseHash?: string
   closedAt?: string
   adminNote?: string
+}
+
+type ChatMessage = {
+  id: string
+  offerId: string
+  senderSessionId: string
+  senderRole: 'seller' | 'buyer'
+  body: string
+  createdAt: string
 }
 
 type UsedPayment = {
@@ -179,6 +189,7 @@ type Store = {
   releaseFeeIntents: ReleaseFeeIntent[]
   escrows: EscrowRecord[]
   offers: OfferRecord[]
+  chatMessages: ChatMessage[]
   usedPayments: UsedPayment[]
   nanoAccounts: NanoAccountRecord[]
 }
@@ -261,8 +272,6 @@ const getCustodianById = (store: Store, custodianId: string | undefined) =>
 const getCustodianByWallet = (store: Store, wallet: string) =>
   getStoreCustodians(store).find((custodian) => custodian.wallet === wallet)
 const getLeaderCustodians = (store: Store) => getStoreCustodians(store).filter((custodian) => custodian.isLeader)
-const isLeaderSession = (store: Store, session: CustodianSession | undefined) =>
-  Boolean(session && getCustodianById(store, session.custodianId).isLeader)
 const pickRandomLeaderCustodian = (store: Store) => {
   const leaders = getLeaderCustodians(store)
   return leaders[Math.floor(Math.random() * leaders.length)] ?? getActiveCustodian(store)
@@ -442,11 +451,12 @@ const readStore = async (): Promise<Store> => {
       releaseFeeIntents: Array.isArray(parsed.releaseFeeIntents) ? parsed.releaseFeeIntents : [],
       escrows: Array.isArray(parsed.escrows) ? parsed.escrows : [],
       offers: Array.isArray(parsed.offers) ? parsed.offers : [],
+      chatMessages: Array.isArray(parsed.chatMessages) ? parsed.chatMessages : [],
       usedPayments: Array.isArray(parsed.usedPayments) ? parsed.usedPayments : [],
       nanoAccounts: normalizeNanoAccounts(parsed.nanoAccounts),
     }
   } catch {
-    return { custodians: sanitizeCustodians(getConfiguredCustodians()), sellerPaymentIntents: [], custodianAuthIntents: [], custodianSessions: [], releaseFeeIntents: [], escrows: [], offers: [], usedPayments: [], nanoAccounts: [] }
+    return { custodians: sanitizeCustodians(getConfiguredCustodians()), sellerPaymentIntents: [], custodianAuthIntents: [], custodianSessions: [], releaseFeeIntents: [], escrows: [], offers: [], chatMessages: [], usedPayments: [], nanoAccounts: [] }
   }
 }
 
@@ -664,6 +674,7 @@ const releaseOfferFunds = async (store: Store, offer: OfferRecord) => {
     `Liberacion de ${offer.amountXno} XNO a ${offer.buyerNanoAddress}. Comision disponible: ${custodyFeeXno} XNO.`,
   ].filter(Boolean).join('\n')
   store.usedPayments.push({ hash: withdrawal.blockHash, purpose: 'custodian_release', createdAt: new Date().toISOString() })
+  await activateReadyQueuedOffers(store)
 
   return withdrawal
 }
@@ -702,8 +713,74 @@ const releaseTakenOffer = (offer: OfferRecord) => {
   offer.escrowNanoAddress = undefined
 }
 
+const activeNegotiationStatuses: OfferStatus[] = ['NEGOTIATION', 'RELEASING']
+const heldNegotiationStatuses: OfferStatus[] = ['QUEUED', 'NEGOTIATION', 'RELEASING']
 
-const publicOffer = (offer: OfferRecord, context: { clientSessionId?: string; custodianSession?: CustodianSession } = {}) => {
+const isOfferParticipant = (offer: OfferRecord, clientSessionId: string) =>
+  Boolean(clientSessionId && (offer.sellerSessionId === clientSessionId || offer.buyerSessionId === clientSessionId))
+
+const getOtherActiveNegotiation = (store: Store, clientSessionId: string, exceptOfferId?: string) =>
+  clientSessionId
+    ? store.offers.find(
+        (item) =>
+          item.id !== exceptOfferId &&
+          activeNegotiationStatuses.includes(item.status) &&
+          isOfferParticipant(item, clientSessionId),
+      )
+    : undefined
+
+const getQueuedReason = (store: Store, offer: OfferRecord) => {
+  const sellerBusy = getOtherActiveNegotiation(store, offer.sellerSessionId || '', offer.id)
+  const buyerBusy = getOtherActiveNegotiation(store, offer.buyerSessionId || '', offer.id)
+  if (sellerBusy && buyerBusy) return 'Ambas partes tienen negociaciones anteriores abiertas. Esta oferta queda en cola hasta que liberen esos procesos.'
+  if (sellerBusy) return 'El vendedor esta cerrando una negociacion anterior. Esta oferta queda en cola y se activara cuando libere ese proceso.'
+  if (buyerBusy) return 'El comprador esta cerrando una negociacion anterior. Esta oferta queda en cola y se activara cuando libere ese proceso.'
+  return undefined
+}
+
+const activateReadyQueuedOffers = async (store: Store) => {
+  const queued = [...store.offers]
+    .filter((offer) => offer.status === 'QUEUED')
+    .sort((left, right) => new Date(left.takenAt || left.createdAt).getTime() - new Date(right.takenAt || right.createdAt).getTime())
+
+  for (const offer of queued) {
+    if (getQueuedReason(store, offer)) continue
+    offer.status = 'NEGOTIATION'
+    offer.takenAt = new Date().toISOString()
+    await assignEscrowAccountToOffer(store, offer)
+  }
+}
+
+const canUseOfferChat = (offer: OfferRecord, clientSessionId: string) =>
+  Boolean(offer.paymentHash && isOfferParticipant(offer, clientSessionId) && ['NEGOTIATION', 'RELEASING'].includes(offer.status))
+
+const getParticipantRole = (offer: OfferRecord, clientSessionId: string): ChatMessage['senderRole'] | undefined => {
+  if (offer.sellerSessionId === clientSessionId) return 'seller'
+  if (offer.buyerSessionId === clientSessionId) return 'buyer'
+  return undefined
+}
+
+const getWalletSuffix = (wallet: string | undefined) => {
+  const normalized = normalizeText(wallet)
+  return normalized ? normalized.slice(-7) : 'wallet'
+}
+
+const getChatSenderLabel = (offer: OfferRecord, senderRole: ChatMessage['senderRole']) => {
+  const roleLabel = senderRole === 'seller' ? 'Vendedor' : 'Comprador'
+  const wallet = senderRole === 'seller' ? offer.sellerWallet : offer.buyerNanoAddress
+  return `${roleLabel} ${getWalletSuffix(wallet)}`
+}
+
+const publicChatMessage = (offer: OfferRecord, message: ChatMessage) => ({
+  id: message.id,
+  offerId: message.offerId,
+  senderRole: message.senderRole,
+  senderLabel: getChatSenderLabel(offer, message.senderRole),
+  body: message.body,
+  createdAt: message.createdAt,
+})
+
+const publicOffer = (offer: OfferRecord, context: { clientSessionId?: string; custodianSession?: CustodianSession; store?: Store } = {}) => {
   const offerType = offer.offerType ?? 'SELL'
   const isSellPublisher = Boolean(offerType === 'SELL' && context.clientSessionId && offer.sellerSessionId && offer.sellerSessionId === context.clientSessionId)
   const isBuyPublisher = Boolean(offerType === 'BUY' && context.clientSessionId && offer.buyerSessionId === context.clientSessionId)
@@ -723,6 +800,7 @@ const publicOffer = (offer: OfferRecord, context: { clientSessionId?: string; cu
     amountXno: offer.amountXno,
     currency: offer.currency,
     price: offer.price,
+    paymentMethods: offer.paymentMethods,
     status: offer.status,
     createdAt: offer.createdAt,
     isOwnOffer: isPublisher || isNanoSeller,
@@ -734,10 +812,12 @@ const publicOffer = (offer: OfferRecord, context: { clientSessionId?: string; cu
       offer.status === 'NEGOTIATION' ||
       (offer.status === 'RELEASING' && !offer.custodianReleaseHash)
     ),
-    canCancelTake: (isPublisher || isTaker) && offer.status === 'NEGOTIATION' && !offer.paymentHash,
+    canCancelTake: (isPublisher || isTaker) && ['QUEUED', 'NEGOTIATION'].includes(offer.status) && !offer.paymentHash,
     canCustodianReleaseOffer: isCustodian && canCustodianReleaseTakenOffer(offer),
     canCustodianReleaseFunds: isCustodian && offer.status === 'RELEASING',
     sellerDepositConfirmed: Boolean(offer.paymentHash),
+    queueReason: offer.status === 'QUEUED' && context.store ? getQueuedReason(context.store, offer) : undefined,
+    canUseChat: Boolean(context.clientSessionId && canUseOfferChat(offer, context.clientSessionId)),
     ...(isSellPublisher && offer.status === 'NEGOTIATION' && offer.paymentHash && offer.buyerContact
       ? {
           buyerCountry: offer.buyerCountry,
@@ -773,7 +853,8 @@ const publicOffer = (offer: OfferRecord, context: { clientSessionId?: string; cu
 }
 
 const takenOfferResponse = (store: Store, offer: OfferRecord, clientSessionId?: string) => ({
-  offer: publicOffer(offer, { clientSessionId }),
+  offer: publicOffer(offer, { clientSessionId, store }),
+  paymentMethods: offer.paymentMethods,
   sellerContact: offer.paymentHash ? offer.sellerContact ?? '' : '',
   sellerCountry: offer.paymentHash ? offer.sellerCountry : undefined,
   sellerDialCode: offer.paymentHash ? offer.sellerDialCode : undefined,
@@ -808,6 +889,7 @@ const findRecoverableEscrow = (store: Store, clientSessionId: string) =>
 const statusLabel = (status: OfferStatus) =>
   ({
     ACTIVE: 'Activa',
+    QUEUED: 'En cola',
     NEGOTIATION: 'En negociacion',
     RELEASING: 'Liberando',
     RELEASED: 'Liberada',
@@ -820,7 +902,7 @@ const renderAdmin = (offers: OfferRecord[]) => `<!doctype html>
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Nanopaquete Admin</title>
+    <title>Nanopaquete Conciliacion</title>
     <style>
       body { margin: 0; font-family: Inter, system-ui, sans-serif; background: #f5f7f4; color: #172019; }
       header { padding: 24px 32px; background: #18241c; color: white; }
@@ -843,7 +925,7 @@ const renderAdmin = (offers: OfferRecord[]) => `<!doctype html>
   </head>
   <body>
     <header>
-      <h1>Nanopaquete Admin</h1>
+      <h1>Nanopaquete Conciliacion</h1>
       <p>Panel manual de custodia, disputas y cierre de operaciones.</p>
       <nav>
         <a href="/?admin=1">Panel principal</a>
@@ -862,6 +944,7 @@ const renderAdmin = (offers: OfferRecord[]) => `<!doctype html>
               <dt>ID custodia</dt><dd>${escapeHtml(offer.escrowId)}</dd>
               <dt>Cuenta temporal</dt><dd>${escapeHtml(offer.escrowNanoAddress)}</dd>
               <dt>ID cuenta temporal</dt><dd>${escapeHtml(offer.escrowNanoAccountId)}</dd>
+              <dt>Metodos de pago</dt><dd>${escapeHtml(offer.paymentMethods)}</dd>
               <dt>Pais vendedor</dt><dd>${escapeHtml(offer.sellerCountry)}</dd>
               <dt>Extension contacto</dt><dd>${escapeHtml(offer.sellerDialCode)}</dd>
               <dt>Contacto vendedor</dt><dd>${escapeHtml(offer.sellerContact)}</dd>
@@ -879,12 +962,12 @@ const renderAdmin = (offers: OfferRecord[]) => `<!doctype html>
               <dt>Tomada</dt><dd>${escapeHtml(offer.takenAt)}</dd>
               <dt>Solicito liberacion</dt><dd>${escapeHtml(offer.releaseRequestedAt)}</dd>
               <dt>Hash liberacion custodia</dt><dd>${escapeHtml(offer.custodianReleaseHash)}</dd>
-              <dt>Nota admin</dt><dd>${escapeHtml(offer.adminNote)}</dd>
+              <dt>Nota interna</dt><dd>${escapeHtml(offer.adminNote)}</dd>
             </dl>
             <div class="offer-actions">
               <form method="post" action="/admin/offers/${encodeURIComponent(offer.id)}/status">
                 <select name="status">
-                  ${(['ACTIVE', 'NEGOTIATION', 'RELEASING', 'DISPUTED', 'CANCELLED', 'RELEASED'] as OfferStatus[])
+                  ${(['ACTIVE', 'QUEUED', 'NEGOTIATION', 'RELEASING', 'DISPUTED', 'CANCELLED', 'RELEASED'] as OfferStatus[])
                     .map((status) => `<option value="${status}" ${status === offer.status ? 'selected' : ''}>${statusLabel(status)}</option>`)
                     .join('')}
                 </select>
@@ -948,7 +1031,7 @@ const renderNanoAccountsAdmin = (accounts: NanoAccountRecord[], destinationWalle
   <body>
     <header>
       <h1>Cuentas Nano</h1>
-      <p>Generacion y administracion de cuentas de custodia para Nanopaquete.</p>
+      <p>Generacion y gestion de cuentas de custodia para Nanopaquete.</p>
       <nav>
         <a href="/?admin=1">Panel principal</a>
         <a href="/admin/offers">Ofertas</a>
@@ -959,7 +1042,7 @@ const renderNanoAccountsAdmin = (accounts: NanoAccountRecord[], destinationWalle
       ${message ? `<section class="message">${escapeHtml(message)}</section>` : ''}
       <section>
         <h2>Generar cuenta</h2>
-        <p class="muted">La clave privada se cifra antes de guardarse. Define <code>NANOPAQUETE_ACCOUNT_SECRET</code> en produccion para no depender de la clave admin.</p>
+        <p class="muted">La clave privada se cifra antes de guardarse. Define <code>NANOPAQUETE_ACCOUNT_SECRET</code> en produccion para no depender de la clave base.</p>
         <form method="post" action="/admin/nano-accounts/generate">
           <label>
             Etiqueta
@@ -1094,9 +1177,9 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     if (custodianSessionId) await writeStore(store)
     sendJson(response, 200, {
       offers: store.offers
-        .filter((offer) => ['ACTIVE', 'NEGOTIATION', 'RELEASING'].includes(offer.status))
+        .filter((offer) => ['ACTIVE', 'QUEUED', 'NEGOTIATION', 'RELEASING'].includes(offer.status))
         .filter((offer) => !custodianSession || offer.custodianId === custodianSession.custodianId)
-        .map((offer) => publicOffer(offer, { clientSessionId, custodianSession })),
+        .map((offer) => publicOffer(offer, { clientSessionId, custodianSession, store })),
     })
     return
   }
@@ -1237,7 +1320,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     const store = await readStore()
     const offer = store.offers.find(
       (item) =>
-        ['NEGOTIATION', 'RELEASING'].includes(item.status) &&
+        heldNegotiationStatuses.includes(item.status) &&
         (item.buyerSessionId === clientSessionId || item.sellerSessionId === clientSessionId),
     )
 
@@ -1491,9 +1574,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     const amountXno = normalizeText(body.amountXno).replace(',', '.')
     const currency = normalizeText(body.currency).toUpperCase()
     const price = normalizeText(body.price)
-    const sellerCountry = normalizeText(body.sellerCountry)
-    const sellerDialCode = normalizeText(body.sellerDialCode)
-    const sellerContact = normalizeText(body.sellerContact)
+    const paymentMethods = normalizeText(body.paymentMethods)
     const clientSessionId = normalizeClientSessionId(body.clientSessionId)
 
     try {
@@ -1513,13 +1594,8 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       return
     }
 
-    if (!sellerCountry || !sellerDialCode) {
-      sendJson(response, 400, { error: 'Ingresa pais y extension del contacto del vendedor.' })
-      return
-    }
-
-    if (sellerContact.length < 6) {
-      sendJson(response, 400, { error: 'Ingresa un contacto valido para la negociacion.' })
+    if (paymentMethods.length < 3) {
+      sendJson(response, 400, { error: 'Ingresa al menos un metodo de pago para la negociacion.' })
       return
     }
 
@@ -1532,9 +1608,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       amountXno,
       currency,
       price,
-      sellerCountry,
-      sellerDialCode,
-      sellerContact,
+      paymentMethods,
       sellerPrivateCode: createCode(8),
       custodianId: custodian.id,
       sellerSessionId: clientSessionId || undefined,
@@ -1545,7 +1619,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     store.offers.unshift(offer)
     await writeStore(store)
 
-    sendJson(response, 201, { offer: publicOffer(offer, { clientSessionId }), sellerPrivateCode: offer.sellerPrivateCode, custodyFeeXno: getCustodyFeeXno(offer.amountXno) })
+    sendJson(response, 201, { offer: publicOffer(offer, { clientSessionId, store }), sellerPrivateCode: offer.sellerPrivateCode, custodyFeeXno: getCustodyFeeXno(offer.amountXno) })
     return
   }
 
@@ -1555,9 +1629,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     const currency = normalizeText(body.currency).toUpperCase()
     const price = normalizeText(body.price)
     const buyerNanoAddress = normalizeText(body.buyerNanoAddress)
-    const buyerCountry = normalizeText(body.buyerCountry)
-    const buyerDialCode = normalizeText(body.buyerDialCode)
-    const buyerContact = normalizeText(body.buyerContact)
+    const paymentMethods = normalizeText(body.paymentMethods)
     const clientSessionId = normalizeClientSessionId(body.clientSessionId)
 
     try {
@@ -1582,8 +1654,8 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       return
     }
 
-    if (!buyerCountry || !buyerDialCode || buyerContact.length < 6) {
-      sendJson(response, 400, { error: 'Ingresa pais, extension y contacto valido.' })
+    if (paymentMethods.length < 3) {
+      sendJson(response, 400, { error: 'Ingresa al menos un metodo de pago para la negociacion.' })
       return
     }
 
@@ -1595,10 +1667,8 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       amountXno,
       currency,
       price,
+      paymentMethods,
       buyerNanoAddress,
-      buyerCountry,
-      buyerDialCode,
-      buyerContact,
       buyerSessionId: clientSessionId || undefined,
       custodianId: custodian.id,
       status: 'ACTIVE',
@@ -1607,7 +1677,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
 
     store.offers.unshift(offer)
     await writeStore(store)
-    sendJson(response, 201, { offer: publicOffer(offer, { clientSessionId }), sellerPrivateCode: '', custodyFeeXno: getCustodyFeeXno(offer.amountXno) })
+    sendJson(response, 201, { offer: publicOffer(offer, { clientSessionId, store }), sellerPrivateCode: '', custodyFeeXno: getCustodyFeeXno(offer.amountXno) })
     return
   }
 
@@ -1695,9 +1765,6 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     const offerId = decodeURIComponent(takeMatch[1])
     const body = await readJsonBody(request)
     const buyerNanoAddress = normalizeText(body.buyerNanoAddress)
-    const buyerCountry = normalizeText(body.buyerCountry)
-    const buyerDialCode = normalizeText(body.buyerDialCode)
-    const buyerContact = normalizeText(body.buyerContact)
     const clientSessionId = normalizeClientSessionId(body.clientSessionId)
 
     const store = await readStore()
@@ -1712,11 +1779,6 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
 
     if (offerType === 'SELL' && !isNanoAddress(buyerNanoAddress)) {
       sendJson(response, 400, { error: 'Ingresa una cuenta nano valida para recibir los XNO.' })
-      return
-    }
-
-    if (!buyerCountry || !buyerDialCode || buyerContact.length < 6) {
-      sendJson(response, 400, { error: 'Ingresa pais, extension y contacto valido.' })
       return
     }
 
@@ -1735,7 +1797,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
 
     const currentNegotiation = store.offers.find(
       (item) =>
-        ['NEGOTIATION', 'RELEASING'].includes(item.status) &&
+        heldNegotiationStatuses.includes(item.status) &&
         (item.buyerSessionId === clientSessionId || item.sellerSessionId === clientSessionId),
     )
 
@@ -1747,18 +1809,17 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     offer.status = 'NEGOTIATION'
     if (offerType === 'SELL') {
       offer.buyerNanoAddress = buyerNanoAddress
-      offer.buyerCountry = buyerCountry
-      offer.buyerDialCode = buyerDialCode
-      offer.buyerContact = buyerContact
       offer.buyerSessionId = clientSessionId || undefined
     } else {
-      offer.sellerCountry = buyerCountry
-      offer.sellerDialCode = buyerDialCode
-      offer.sellerContact = buyerContact
       offer.sellerSessionId = clientSessionId || undefined
     }
     offer.takenAt = new Date().toISOString()
-    await assignEscrowAccountToOffer(store, offer)
+    const publisherSessionId = offerType === 'BUY' ? offer.buyerSessionId : offer.sellerSessionId
+    if (getOtherActiveNegotiation(store, publisherSessionId || '', offer.id)) {
+      offer.status = 'QUEUED'
+    } else {
+      await assignEscrowAccountToOffer(store, offer)
+    }
     await writeStore(store)
 
     sendJson(response, 200, takenOfferResponse(store, offer, clientSessionId))
@@ -1780,7 +1841,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
         return
       }
 
-      if (offer.status !== 'NEGOTIATION') {
+      if (!['QUEUED', 'NEGOTIATION'].includes(offer.status)) {
         sendJson(response, 409, { error: 'Esta oferta no esta en negociacion.' })
         return
       }
@@ -1810,6 +1871,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
 
       releaseUnusedEscrowAccount(store, offer)
       releaseTakenOffer(offer)
+      await activateReadyQueuedOffers(store)
       await writeStore(store)
 
       sendJson(response, 200, { offer: publicOffer(offer, { clientSessionId }), refundHash })
@@ -2118,6 +2180,81 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     return
   }
 
+  const chatMatch = url.pathname.match(/^\/api\/offers\/([^/]+)\/chat$/)
+
+  if (request.method === 'GET' && chatMatch) {
+    const offerId = decodeURIComponent(chatMatch[1])
+    const clientSessionId = normalizeClientSessionId(url.searchParams.get('clientSessionId'))
+    const store = await readStore()
+    const offer = store.offers.find((item) => item.id === offerId)
+
+    if (!offer) {
+      sendJson(response, 404, { error: 'La oferta no existe.' })
+      return
+    }
+
+    if (!canUseOfferChat(offer, clientSessionId)) {
+      sendJson(response, 403, { error: 'El chat se habilita cuando el vendedor deposita los XNO en custodia.' })
+      return
+    }
+
+    sendJson(response, 200, {
+      messages: store.chatMessages
+        .filter((message) => message.offerId === offer.id)
+        .map((message) => publicChatMessage(offer, message)),
+    })
+    return
+  }
+
+  if (request.method === 'POST' && chatMatch) {
+    const offerId = decodeURIComponent(chatMatch[1])
+    const body = await readJsonBody(request)
+    const clientSessionId = normalizeClientSessionId(body.clientSessionId)
+    const messageBody = normalizeText(body.body).slice(0, 1200)
+    const store = await readStore()
+    const offer = store.offers.find((item) => item.id === offerId)
+
+    if (!offer) {
+      sendJson(response, 404, { error: 'La oferta no existe.' })
+      return
+    }
+
+    if (!canUseOfferChat(offer, clientSessionId)) {
+      sendJson(response, 403, { error: 'El chat se habilita cuando el vendedor deposita los XNO en custodia.' })
+      return
+    }
+
+    const senderRole = getParticipantRole(offer, clientSessionId)
+    if (!senderRole) {
+      sendJson(response, 403, { error: 'Solo las partes de esta negociacion pueden escribir en el chat.' })
+      return
+    }
+
+    if (!messageBody) {
+      sendJson(response, 400, { error: 'Escribe un mensaje para enviarlo.' })
+      return
+    }
+
+    const message: ChatMessage = {
+      id: `msg_${randomUUID().replaceAll('-', '').slice(0, 18)}`,
+      offerId: offer.id,
+      senderSessionId: clientSessionId,
+      senderRole,
+      body: messageBody,
+      createdAt: new Date().toISOString(),
+    }
+    store.chatMessages.push(message)
+    await writeStore(store)
+
+    sendJson(response, 201, {
+      message: publicChatMessage(offer, message),
+      messages: store.chatMessages
+        .filter((item) => item.offerId === offer.id)
+        .map((item) => publicChatMessage(offer, item)),
+    })
+    return
+  }
+
   sendJson(response, 404, { error: 'Ruta no encontrada.' })
 }
 
@@ -2281,7 +2418,7 @@ const handleAdmin = async (request: IncomingMessage, response: ServerResponse, u
     const nextStatus = String(form.get('status') ?? '')
     const adminNote = String(form.get('adminNote') ?? '').trim()
 
-    if (!(['ACTIVE', 'NEGOTIATION', 'DISPUTED', 'CANCELLED', 'RELEASED'] as string[]).includes(nextStatus)) {
+    if (!(['ACTIVE', 'QUEUED', 'NEGOTIATION', 'RELEASING', 'DISPUTED', 'CANCELLED', 'RELEASED'] as string[]).includes(nextStatus)) {
       sendJson(response, 400, { error: 'Estado invalido.' })
       return
     }
@@ -2300,7 +2437,10 @@ const handleAdmin = async (request: IncomingMessage, response: ServerResponse, u
 
     offer.status = nextStatus as OfferStatus
     offer.adminNote = adminNote || undefined
-    if (nextStatus === 'CANCELLED' || nextStatus === 'RELEASED') offer.closedAt = new Date().toISOString()
+    if (nextStatus === 'CANCELLED' || nextStatus === 'RELEASED') {
+      offer.closedAt = new Date().toISOString()
+      await activateReadyQueuedOffers(store)
+    }
 
     await writeStore(store)
     response.writeHead(303, { Location: '/admin/offers', ...corsHeaders })

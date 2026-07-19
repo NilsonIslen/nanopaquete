@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, CheckCircle2, Copy, Download, Menu, ShieldCheck, Wallet, X } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, Copy, Download, Menu, Send, ShieldCheck, Wallet, X } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import {
   addManagedCustodian,
@@ -8,6 +8,7 @@ import {
   deleteOffer,
   deleteManagedCustodian,
   getManagedCustodians,
+  getOfferChat,
   getBuyerNegotiation,
   getCustodians,
   getOffers,
@@ -17,6 +18,7 @@ import {
   releaseExpiredTakenOffer,
   startCustodianAuth,
   startReleaseFee,
+  sendOfferChatMessage,
   takeOffer,
   updateOfferPrice,
   verifyCustodianAuth,
@@ -29,6 +31,7 @@ import {
   type PublicOffer,
   type ReleaseFeeIntent,
   type TakenOffer,
+  type ChatMessage,
   type ManagedCustodian,
 } from './api'
 import './Nanopaquete.css'
@@ -103,50 +106,23 @@ const getOfferGroupTitle = (currency: Currency) => {
   return details.isCrypto ? 'Global' : `${currency} ${details.group}`
 }
 
+const getCustodianContactLabel = (custodian: CustodianOption) =>
+  [custodian.dialCode, custodian.contact].filter(Boolean).join(' ') || custodian.wallet || 'Contacto pendiente'
+
 type AppView = 'offers' | 'create-offer' | 'wallet' | 'donations' | 'custodian-auth' | 'guide'
 
 const nautilusDownloadUrl = 'https://nautilus.io/'
 const natriumDownloadUrl = 'https://natrium.io/'
 
-const contactCountries = [
-  { country: 'Argentina', dialCode: '+54' },
-  { country: 'Bolivia', dialCode: '+591' },
-  { country: 'Brasil', dialCode: '+55' },
-  { country: 'Chile', dialCode: '+56' },
-  { country: 'Colombia', dialCode: '+57' },
-  { country: 'Costa Rica', dialCode: '+506' },
-  { country: 'Cuba', dialCode: '+53' },
-  { country: 'Ecuador', dialCode: '+593' },
-  { country: 'El Salvador', dialCode: '+503' },
-  { country: 'Espana', dialCode: '+34' },
-  { country: 'Estados Unidos', dialCode: '+1' },
-  { country: 'Guatemala', dialCode: '+502' },
-  { country: 'Haiti', dialCode: '+509' },
-  { country: 'Honduras', dialCode: '+504' },
-  { country: 'Mexico', dialCode: '+52' },
-  { country: 'Nicaragua', dialCode: '+505' },
-  { country: 'Panama', dialCode: '+507' },
-  { country: 'Paraguay', dialCode: '+595' },
-  { country: 'Peru', dialCode: '+51' },
-  { country: 'Republica Dominicana', dialCode: '+1' },
-  { country: 'Uruguay', dialCode: '+598' },
-  { country: 'Venezuela', dialCode: '+58' },
-]
-
 const initialSellerForm = {
   amountXno: '',
   currency: 'COP' as Currency,
   price: '',
-  sellerCountry: 'Colombia',
-  sellerDialCode: '+57',
-  sellerContact: '',
+  paymentMethods: '',
 }
 
 const initialBuyerForm = {
   nanoAddress: '',
-  country: 'Colombia',
-  dialCode: '+57',
-  contact: '',
 }
 
 const initialBuyOfferForm = {
@@ -154,9 +130,7 @@ const initialBuyOfferForm = {
   currency: 'COP' as Currency,
   price: '',
   nanoAddress: '',
-  country: 'Colombia',
-  dialCode: '+57',
-  contact: '',
+  paymentMethods: '',
 }
 
 const initialCustodianForm = {
@@ -282,6 +256,8 @@ export function Nanopaquete() {
   const [releaseFeeIntent, setReleaseFeeIntent] = useState<ReleaseFeeIntent | null>(null)
   const [editingPriceOfferId, setEditingPriceOfferId] = useState<string | null>(null)
   const [editingPrice, setEditingPrice] = useState('')
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([])
+  const [chatDraft, setChatDraft] = useState('')
   const [loading, setLoading] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [activeView, setActiveView] = useState<AppView>(getInitialView)
@@ -294,20 +270,9 @@ export function Nanopaquete() {
   const donationCustodian = custodians.find((custodian) => custodian.isLeader && custodian.wallet) ?? custodians.find((custodian) => custodian.wallet)
   const donationWallet = donationCustodian?.wallet ?? ''
   const donationPaymentUri = donationWallet ? `nano:${donationWallet}` : ''
+  const disputeConciliators = custodians.filter((custodian) => custodian.contact || custodian.wallet)
   const takenOfferId = takenOffer?.offer.id
-  const takenOfferOtherParty = takenOffer?.offer.canConfirmPayment
-    ? {
-        role: 'comprador',
-        country: takenOffer.buyerCountry,
-        dialCode: takenOffer.buyerDialCode,
-        contact: takenOffer.buyerContact,
-      }
-    : {
-        role: 'vendedor',
-        country: takenOffer?.sellerCountry,
-        dialCode: takenOffer?.sellerDialCode,
-        contact: takenOffer?.sellerContact,
-      }
+  const displayedChatMessages = chatMessages.filter((message) => message.offerId === takenOfferId)
   const displayedManagedCustodians = [...managedCustodians].sort((left, right) => {
     if (left.id === custodianSession?.custodianId) return -1
     if (right.id === custodianSession?.custodianId) return 1
@@ -387,6 +352,29 @@ export function Nanopaquete() {
 
     return () => window.clearInterval(interval)
   }, [clientSessionId, takenOfferId])
+
+  useEffect(() => {
+    if (!takenOfferId || !takenOffer?.offer.canUseChat) {
+      return undefined
+    }
+
+    let ignore = false
+    const loadChat = () => {
+      getOfferChat(takenOfferId, clientSessionId)
+        .then((response) => {
+          if (!ignore) setChatMessages(response.messages)
+        })
+        .catch(() => undefined)
+    }
+
+    loadChat()
+    const interval = window.setInterval(loadChat, 5000)
+
+    return () => {
+      ignore = true
+      window.clearInterval(interval)
+    }
+  }, [clientSessionId, takenOffer?.offer.canUseChat, takenOfferId])
 
   useEffect(() => {
     if (takenOfferId || activeView !== 'offers') return undefined
@@ -530,9 +518,7 @@ export function Nanopaquete() {
         amountXno: sellerForm.amountXno,
         currency: sellerForm.currency,
         price: sellerForm.price,
-        sellerCountry: sellerForm.sellerCountry,
-        sellerDialCode: sellerForm.sellerDialCode,
-        sellerContact: sellerForm.sellerContact,
+        paymentMethods: sellerForm.paymentMethods,
         custodianId: selectedCustodianId,
         clientSessionId,
       })
@@ -557,9 +543,7 @@ export function Nanopaquete() {
         currency: buyOfferForm.currency,
         price: buyOfferForm.price,
         buyerNanoAddress: buyOfferForm.nanoAddress,
-        buyerCountry: buyOfferForm.country,
-        buyerDialCode: buyOfferForm.dialCode,
-        buyerContact: buyOfferForm.contact,
+        paymentMethods: buyOfferForm.paymentMethods,
         clientSessionId,
       })
       setBuyOfferForm(initialBuyOfferForm)
@@ -585,9 +569,6 @@ export function Nanopaquete() {
     try {
       const response = await takeOffer(selectedOffer.id, {
         buyerNanoAddress: selectedOffer.offerType === 'SELL' ? buyerForm.nanoAddress : undefined,
-        buyerCountry: buyerForm.country,
-        buyerDialCode: buyerForm.dialCode,
-        buyerContact: buyerForm.contact,
         clientSessionId,
       })
       setTakenOffer(response)
@@ -596,6 +577,26 @@ export function Nanopaquete() {
       await loadOffers()
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'No se pudo tomar la oferta.')
+    } finally {
+      setLoading(null)
+    }
+  }
+
+  const handleSendChatMessage = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!takenOffer?.offer.canUseChat || !chatDraft.trim()) return
+    setError(null)
+    setLoading('chat-send')
+
+    try {
+      const response = await sendOfferChatMessage(takenOffer.offer.id, {
+        clientSessionId,
+        body: chatDraft,
+      })
+      setChatMessages(response.messages)
+      setChatDraft('')
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : 'No se pudo enviar el mensaje.')
     } finally {
       setLoading(null)
     }
@@ -841,7 +842,7 @@ export function Nanopaquete() {
               <>
                 <div className="private-box custodian-admin-box">
                   <div className="panel-heading">
-                    <h3>Administrador</h3>
+                    <h3>Conciliador</h3>
                   </div>
                   <div className="button-row">
                     <a className="wallet-download-link standalone-link" href="/admin/offers">
@@ -972,7 +973,7 @@ export function Nanopaquete() {
           <div className="panel donation-panel">
             <h2>Donaciones</h2>
             <p>Las donaciones ayudan a sostener el desarrollo, el mantenimiento y la infraestructura necesaria para que Nanopaquete funcione de forma continua.</p>
-            <p>Cualquier aporte en Nano se recibe en la cuenta de administración actual.</p>
+            <p>Cualquier aporte en Nano se recibe en la cuenta de conciliación actual.</p>
             {donationPaymentUri ? (
               <>
                 <div className="payment-actions">
@@ -991,7 +992,7 @@ export function Nanopaquete() {
                 <dl>
                   <dt>Cuenta Nano</dt>
                   <dd>{donationWallet}</dd>
-                  <dt>Administrador</dt>
+                  <dt>Conciliador</dt>
                   <dd>{donationCustodian?.name ?? 'No disponible'}</dd>
                 </dl>
               </>
@@ -1011,25 +1012,36 @@ export function Nanopaquete() {
             <p>La plataforma no persigue el precio del mercado. Cada usuario define cuántos XNO compra o vende, qué activo entrega o recibe a cambio y cuál es la cantidad de ese activo. Esa libertad crea un mercado interno donde la competencia entre ofertas regula la inflación o depreciación dentro de Nanopaquete.</p>
             <p>Cuando una oferta entra en negociación, Nanopaquete crea una cuenta Nano temporal para custodiar los fondos de esa operación. Esa cuenta se guarda de forma segura en el servidor y no se muestra a los usuarios.</p>
             <h3>Publicar venta de Nano</h3>
-            <p>El vendedor publica una oferta indicando la cantidad de XNO, el activo que recibe a cambio, la cantidad de ese activo y su número de contacto.</p>
+            <p>El vendedor publica una oferta indicando la cantidad de XNO, el activo que recibe a cambio, la cantidad de ese activo y los métodos de pago aceptados.</p>
             <p>La oferta queda visible y vinculada al equipo desde el que fue creada. Mientras nadie la tome, el vendedor puede eliminarla. Las ofertas disponibles vencen automáticamente a las 24 horas.</p>
-            <p>Cuando un comprador toma la oferta, ingresa su número de contacto y la cuenta Nano donde espera recibir los fondos. Nanopaquete le informa que el vendedor está siendo notificado para depositar los XNO.</p>
+            <p>Cuando un comprador toma la oferta, ingresa la cuenta Nano donde espera recibir los fondos. Nanopaquete le informa que el vendedor debe depositar los XNO.</p>
             <p>El vendedor recibe la notificación, ve el botón y el QR de depósito, y deposita la cantidad publicada más el 0,2% de comisión de plataforma.</p>
-            <p>Cuando el depósito queda confirmado, el vendedor ve el contacto del comprador y se le habilita el botón para confirmar el pago recibido. El comprador ve el contacto del vendedor y puede comunicarse para acordar el pago con la tranquilidad de que los XNO están en custodia.</p>
+            <p>Cuando el depósito queda confirmado, se habilita un chat interno para que comprador y vendedor coordinen el pago dentro de la plataforma. El vendedor conserva el botón para confirmar el pago recibido.</p>
             <p>Cuando el vendedor confirma que recibió el pago, Nanopaquete transfiere los XNO a la cuenta registrada por el comprador y cierra la negociación.</p>
             <h3>Publicar compra de Nano</h3>
-            <p>El comprador publica una oferta indicando la cantidad de XNO que quiere comprar, el activo que entrega a cambio, la cantidad de ese activo, su cuenta Nano receptora y su número de contacto.</p>
-            <p>Cuando un vendedor toma la oferta, ingresa su número de contacto. Nanopaquete crea la cuenta Nano temporal de custodia y habilita al vendedor el botón y el QR para depositar.</p>
-            <p>El vendedor deposita la cantidad de XNO de la oferta más el 0,2% de comisión de plataforma. Cuando el depósito queda confirmado, Nanopaquete notifica al comprador y muestra los números de contacto para que ambas partes acuerden el pago.</p>
+            <p>El comprador publica una oferta indicando la cantidad de XNO que quiere comprar, el activo que entrega a cambio, la cantidad de ese activo, su cuenta Nano receptora y los métodos de pago disponibles.</p>
+            <p>Cuando un vendedor toma la oferta, Nanopaquete crea la cuenta Nano temporal de custodia y habilita al vendedor el botón y el QR para depositar.</p>
+            <p>El vendedor deposita la cantidad de XNO de la oferta más el 0,2% de comisión de plataforma. Cuando el depósito queda confirmado, Nanopaquete habilita el chat interno para que ambas partes acuerden el pago.</p>
             <p>Cuando el comprador paga, el vendedor confirma la recepción del pago y Nanopaquete libera los XNO a la cuenta Nano registrada por el comprador.</p>
+            <h3>Cola de negociaciones</h3>
+            <p>Si una persona tiene varios anuncios y ya está cerrando una negociación, las siguientes tomas quedan en cola. La plataforma muestra el motivo a quienes esperan y activa la siguiente negociación cuando la contraparte libera la anterior.</p>
             <h3>Posibles disputas</h3>
-            <p>Si aparece una disputa durante una negociación, conserva los comprobantes y contacta al administrador de Nanopaquete por Telegram: @nililen, o al número +57 3008188284.</p>
+            <p>Si aparece una disputa durante una negociación, conserva los comprobantes y contacta a un conciliador de Nanopaquete. Los conciliadores son personas que autorizan mostrar sus datos en esta guía para ayudar a resolver disputas.</p>
+            <div className="conciliator-list">
+              {disputeConciliators.map((conciliator) => (
+                <article className="conciliator-item" key={conciliator.id}>
+                  <strong>{conciliator.name}</strong>
+                  <span>{getCustodianContactLabel(conciliator)}</span>
+                </article>
+              ))}
+              {!disputeConciliators.length && <p className="empty-state">No hay conciliadores publicados en este momento.</p>}
+            </div>
             <div className="guide-disputes">
-              <p><strong>Una parte no responde:</strong> la otra parte debe conservar comprobantes y solicitar revisión al administrador.</p>
-              <p><strong>El pago externo no se confirma:</strong> los XNO permanecen en custodia hasta que exista una confirmación suficiente o una decisión administrativa.</p>
-              <p><strong>Una parte ingresó un contacto incorrecto:</strong> la revisión se hace con la información disponible en la negociación y los comprobantes que pueda aportar cada parte.</p>
+              <p><strong>Una parte no responde:</strong> la otra parte debe conservar comprobantes y solicitar revisión a un conciliador.</p>
+              <p><strong>El pago externo no se confirma:</strong> los XNO permanecen en custodia hasta que exista una confirmación suficiente o una decisión de conciliación.</p>
+              <p><strong>El chat no fue suficiente para coordinar:</strong> la revisión se hace con la información disponible en la negociación y los comprobantes que pueda aportar cada parte.</p>
               <p><strong>El comprador ingresó una cuenta Nano incorrecta:</strong> la cuenta Nano debe revisarse antes de confirmar la operación, porque la liberación se realiza hacia la cuenta registrada en la negociación.</p>
-              <p><strong>Hay una falla técnica:</strong> el administrador revisa los datos de la negociación, los depósitos, los contactos y el estado de la cuenta temporal.</p>
+              <p><strong>Hay una falla técnica:</strong> un conciliador revisa los datos de la negociación, los depósitos, el chat y el estado de la cuenta temporal.</p>
             </div>
           </div>
         </section>
@@ -1093,26 +1105,11 @@ export function Nanopaquete() {
                 />
               </label>
               <label>
-                Pais del contacto
-                <select
-                  value={sellerForm.sellerCountry}
-                  onChange={(event) => {
-                    const selected = contactCountries.find((item) => item.country === event.target.value)
-                    updateSellerForm('sellerCountry', event.target.value)
-                    updateSellerForm('sellerDialCode', selected?.dialCode ?? '')
-                  }}
-                >
-                  {contactCountries.map((item) => (
-                    <option key={item.country} value={item.country}>{item.country}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Contacto
+                Metodo(s) de pago
                 <input
-                  placeholder="Ej. 3120000000"
-                  value={sellerForm.sellerContact}
-                  onChange={(event) => updateSellerForm('sellerContact', event.target.value)}
+                  placeholder="Ej. Nequi, transferencia bancaria, efectivo"
+                  value={sellerForm.paymentMethods}
+                  onChange={(event) => updateSellerForm('paymentMethods', event.target.value)}
                   required
                 />
               </label>
@@ -1165,26 +1162,11 @@ export function Nanopaquete() {
                 />
               </label>
               <label>
-                País del contacto
-                <select
-                  value={buyOfferForm.country}
-                  onChange={(event) => {
-                    const selected = contactCountries.find((item) => item.country === event.target.value)
-                    updateBuyOfferForm('country', event.target.value)
-                    updateBuyOfferForm('dialCode', selected?.dialCode ?? '')
-                  }}
-                >
-                  {contactCountries.map((item) => (
-                    <option key={item.country} value={item.country}>{item.country}</option>
-                  ))}
-                </select>
-              </label>
-              <label>
-                Contacto
+                Metodo(s) de pago
                 <input
-                  placeholder="Ej. 3120000000"
-                  value={buyOfferForm.contact}
-                  onChange={(event) => updateBuyOfferForm('contact', event.target.value)}
+                  placeholder="Ej. Nequi, transferencia bancaria, efectivo"
+                  value={buyOfferForm.paymentMethods}
+                  onChange={(event) => updateBuyOfferForm('paymentMethods', event.target.value)}
                   required
                 />
               </label>
@@ -1228,7 +1210,8 @@ export function Nanopaquete() {
                     )}
                     <p className="offer-amount">{offer.amountXno} XNO</p>
                     <p>{offer.price} {offer.currency}</p>
-                    <small>Estado: {offer.status === 'ACTIVE' ? 'Activa' : offer.status === 'NEGOTIATION' ? 'En negociacion' : 'Liberando'}</small>
+                    {offer.paymentMethods && <small>Pago: {offer.paymentMethods}</small>}
+                    <small>Estado: {offer.status === 'ACTIVE' ? 'Activa' : offer.status === 'QUEUED' ? 'En cola' : offer.status === 'NEGOTIATION' ? 'En negociacion' : 'Liberando'}</small>
                     <small>Publicada {shortDate(offer.createdAt)}</small>
                   </div>
                   {offer.canEditPrice && editingPriceOfferId !== offer.id && (
@@ -1301,7 +1284,7 @@ export function Nanopaquete() {
                     <div className="private-box release-fee-box inline-release-fee-box">
                       <p className="eyebrow">Deposito de Nano</p>
                       <h3>Deposita {releaseFeeIntent.amountXno} XNO en la cuenta temporal.</h3>
-                      <p>Cuando la app detecte esa transferencia, se mostraran los datos de contacto para continuar la negociacion.</p>
+                      <p>Cuando la app detecte esa transferencia, se habilitara el chat interno para continuar la negociacion.</p>
                       <div className="payment-actions">
                         <button className="primary-button" type="button" onClick={() => openNanoPayment(releaseFeeIntent.paymentUri)}>
                           <Wallet size={18} />
@@ -1336,52 +1319,29 @@ export function Nanopaquete() {
                       <p>
                         {offer.canDepositNano
                           ? 'Deposita los XNO en la cuenta temporal para continuar la negociación.'
-                          : 'Espera la confirmación del depósito Nano para ver los datos de contacto y continuar la negociación.'}
+                          : 'Espera la confirmación del depósito Nano para habilitar el chat interno.'}
                       </p>
                     </div>
                   )}
-                  {offer.status === 'NEGOTIATION' && offer.isPublishedOffer && (
-                    (offer.offerType === 'SELL' && offer.buyerContact) ||
-                    (offer.offerType === 'BUY' && offer.sellerContact)
-                  ) && (
+                  {offer.status === 'QUEUED' && (offer.isPublishedOffer || offer.isOwnOffer) && (
                     <div className="private-box seller-buyer-box">
-                      <p className="eyebrow">Persona que tomó esta oferta</p>
-                      <dl>
-                        <dt>Pais</dt>
-                        <dd>{offer.offerType === 'BUY' ? offer.sellerCountry || 'No informado' : offer.buyerCountry || 'No informado'}</dd>
-                        <dt>Contacto</dt>
-                        <dd>
-                          {offer.offerType === 'BUY'
-                            ? `${offer.sellerDialCode ? offer.sellerDialCode + ' ' : ''}${offer.sellerContact}`
-                            : `${offer.buyerDialCode ? offer.buyerDialCode + ' ' : ''}${offer.buyerContact}`}
-                        </dd>
-                      </dl>
+                      <p className="eyebrow">En cola</p>
+                      <p>{offer.queueReason || 'La contraparte tiene una negociacion anterior abierta. Espera un poco mientras libera esa operacion.'}</p>
                     </div>
                   )}
-                  {custodianSession && offer.status === 'NEGOTIATION' && offer.sellerContact && offer.buyerContact && (
+                  {custodianSession && offer.status === 'NEGOTIATION' && offer.canCustodianReleaseOffer && (
                     <div className="private-box seller-buyer-box">
-                      <p className="eyebrow">Contactos para disputa</p>
-                      <dl>
-                        <dt>Pais vendedor</dt>
-                        <dd>{offer.sellerCountry || 'No informado'}</dd>
-                        <dt>Contacto vendedor</dt>
-                        <dd>{offer.sellerDialCode ? offer.sellerDialCode + ' ' : ''}{offer.sellerContact}</dd>
-                        <dt>Pais comprador</dt>
-                        <dd>{offer.buyerCountry || 'No informado'}</dd>
-                        <dt>Contacto comprador</dt>
-                        <dd>{offer.buyerDialCode ? offer.buyerDialCode + ' ' : ''}{offer.buyerContact}</dd>
-                      </dl>
-                      {offer.canCustodianReleaseOffer && (
-                        <button
-                          className="ghost-button danger-button"
-                          type="button"
-                          onClick={() => void handleReleaseExpiredTakenOffer(offer.id)}
-                          disabled={loading === `release-expired:${offer.id}`}
-                        >
-                          <X size={16} />
-                          {loading === `release-expired:${offer.id}` ? 'Liberando...' : 'Liberar oferta'}
-                        </button>
-                      )}
+                      <p className="eyebrow">Revision de custodia</p>
+                      <p>Esta negociacion supero el tiempo de espera sin deposito confirmado.</p>
+                      <button
+                        className="ghost-button danger-button"
+                        type="button"
+                        onClick={() => void handleReleaseExpiredTakenOffer(offer.id)}
+                        disabled={loading === `release-expired:${offer.id}`}
+                      >
+                        <X size={16} />
+                        {loading === `release-expired:${offer.id}` ? 'Liberando...' : 'Liberar oferta'}
+                      </button>
                     </div>
                   )}
                   {offer.status === 'RELEASING' && !offer.canCustodianReleaseFunds && (
@@ -1438,30 +1398,9 @@ export function Nanopaquete() {
                           />
                         </label>
                       )}
-                      <label>
-                        Pais del contacto
-                        <select
-                          value={buyerForm.country}
-                          onChange={(event) => {
-                            const selected = contactCountries.find((item) => item.country === event.target.value)
-                            updateBuyerForm('country', event.target.value)
-                            updateBuyerForm('dialCode', selected?.dialCode ?? '')
-                          }}
-                        >
-                          {contactCountries.map((item) => (
-                            <option key={item.country} value={item.country}>{item.country}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <label>
-                        Contacto
-                        <input
-                          placeholder="Ej. 3120000000"
-                          value={buyerForm.contact}
-                          onChange={(event) => updateBuyerForm('contact', event.target.value)}
-                          required
-                        />
-                      </label>
+                      <p className="form-note">
+                        Cuando el vendedor deposite los XNO, se habilitara el chat interno para coordinar el pago por los metodos publicados.
+                      </p>
                       <div className="button-row">
                         <button className="primary-button" type="submit" disabled={loading === 'take'}>
                           Confirmar
@@ -1483,8 +1422,13 @@ export function Nanopaquete() {
 
           {takenOffer && (
             <div className="private-box buyer-result">
-              <p className="eyebrow">{takenOffer.offer.status === 'RELEASING' ? 'Pago confirmado' : 'Negociación iniciada'}</p>
-              {takenOffer.offer.status === 'RELEASING' ? (
+              <p className="eyebrow">{takenOffer.offer.status === 'QUEUED' ? 'En cola' : takenOffer.offer.status === 'RELEASING' ? 'Pago confirmado' : 'Negociación iniciada'}</p>
+              {takenOffer.offer.status === 'QUEUED' ? (
+                <>
+                  <h3>Esta negociacion esta esperando turno.</h3>
+                  <p>{takenOffer.offer.queueReason || 'La contraparte tiene una negociacion anterior abierta. Espera un poco mientras libera esa operacion.'}</p>
+                </>
+              ) : takenOffer.offer.status === 'RELEASING' ? (
                 <>
                   <h3>{takenOffer.offer.canConfirmPayment ? 'Confirmaste que recibiste el pago.' : 'El vendedor ya confirmó que recibió el pago.'}</h3>
                   <p>Nanopaquete está trabajando para liberar los fondos al comprador. Si la red tarda, el sistema reintentará automáticamente; espera unos minutos antes de solicitar intervención.</p>
@@ -1497,29 +1441,46 @@ export function Nanopaquete() {
               ) : !takenOffer.offer.sellerDepositConfirmed ? (
                 <>
                   <h3>Deposita los XNO para iniciar la negociación.</h3>
-                  <p>Después de confirmar el depósito, se mostrarán los datos del comprador para acordar el pago externo.</p>
+                  <p>Después de confirmar el depósito, se habilitará el chat interno para acordar el pago externo.</p>
                 </>
               ) : (
                 <>
-                  <h3>Comunícate con el {takenOfferOtherParty.role} para acordar el pago.</h3>
-                  <p>{takenOffer.offer.canConfirmPayment ? 'Los XNO ya están bloqueados en custodia. Confirma el pago recibido cuando el comprador complete el pago externo.' : 'Los XNO de esta oferta ya están bloqueados en custodia. El vendedor solo puede liberar a la cuenta que registraste cuando reciba el pago.'}</p>
+                  <h3>Chat interno habilitado.</h3>
+                  <p>{takenOffer.offer.canConfirmPayment ? 'Los XNO ya están bloqueados en custodia. Coordina el pago en el chat y confirma cuando recibas el pago externo.' : 'Los XNO de esta oferta ya están bloqueados en custodia. Coordina el pago en el chat; el vendedor solo puede liberar a la cuenta que registraste cuando reciba el pago.'}</p>
                   <p>Si ocurre un contratiempo que no puedas solucionar directamente con la otra parte, consulta la guía.</p>
                 </>
               )}
               <dl>
-                {takenOffer.offer.status === 'NEGOTIATION' && takenOffer.offer.sellerDepositConfirmed && (
-                  <>
-                    <dt>Pais {takenOfferOtherParty.role}</dt>
-                    <dd>{takenOfferOtherParty.country || 'No informado'}</dd>
-                    <dt>Contacto {takenOfferOtherParty.role}</dt>
-                    <dd>
-                      {`${takenOfferOtherParty.dialCode ? takenOfferOtherParty.dialCode + ' ' : ''}${takenOfferOtherParty.contact}`}
-                    </dd>
-                  </>
-                )}
                 <dt>Oferta tomada</dt>
                 <dd>{takenOffer.offer.amountXno} XNO por {takenOffer.offer.price} {takenOffer.offer.currency}</dd>
+                <dt>Metodo(s) de pago</dt>
+                <dd>{takenOffer.paymentMethods || takenOffer.offer.paymentMethods || 'No informado'}</dd>
               </dl>
+              {takenOffer.offer.canUseChat && (
+                <section className="chat-box" aria-label="Chat de negociacion">
+                  <div className="chat-messages">
+                    {displayedChatMessages.map((message) => (
+                      <article className={`chat-message ${message.senderRole === 'seller' ? 'seller-message' : 'buyer-message'}`} key={message.id}>
+                        <strong>{message.senderLabel}</strong>
+                        <p>{message.body}</p>
+                        <small>{shortDate(message.createdAt)}</small>
+                      </article>
+                    ))}
+                    {!displayedChatMessages.length && <p className="empty-state">Aun no hay mensajes en esta negociacion.</p>}
+                  </div>
+                  <form className="chat-form" onSubmit={handleSendChatMessage}>
+                    <input
+                      value={chatDraft}
+                      onChange={(event) => setChatDraft(event.target.value)}
+                      placeholder="Escribe un mensaje"
+                      maxLength={1200}
+                    />
+                    <button className="primary-button" type="submit" disabled={loading === 'chat-send' || !chatDraft.trim()} aria-label="Enviar mensaje" title="Enviar mensaje">
+                      <Send size={17} />
+                    </button>
+                  </form>
+                </section>
+              )}
               {takenOffer.offer.canCancelTake && (
                 <button
                   className="ghost-button danger-button"

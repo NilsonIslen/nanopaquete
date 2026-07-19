@@ -33,7 +33,7 @@ export type Currency =
   | 'USD'
   | 'UYU'
   | 'VES'
-export type OfferStatus = 'ACTIVE' | 'NEGOTIATION' | 'RELEASING' | 'RELEASED' | 'CANCELLED' | 'DISPUTED'
+export type OfferStatus = 'ACTIVE' | 'QUEUED' | 'NEGOTIATION' | 'RELEASING' | 'RELEASED' | 'CANCELLED' | 'DISPUTED'
 export type OfferType = 'SELL' | 'BUY'
 
 export type CustodianOption = {
@@ -57,6 +57,7 @@ export type PublicOffer = {
   amountXno: string
   currency: Currency
   price: string
+  paymentMethods?: string
   status: OfferStatus
   createdAt: string
   isOwnOffer?: boolean
@@ -75,6 +76,8 @@ export type PublicOffer = {
   buyerCountry?: string
   buyerDialCode?: string
   buyerContact?: string
+  queueReason?: string
+  canUseChat?: boolean
 }
 
 export type SellerPaymentIntent = {
@@ -103,9 +106,7 @@ export type PublishOfferPayload = {
   amountXno: string
   currency: Currency
   price: string
-  sellerCountry: string
-  sellerDialCode: string
-  sellerContact: string
+  paymentMethods: string
   custodianId: string
   clientSessionId: string
 }
@@ -115,9 +116,7 @@ export type PublishBuyOfferPayload = {
   currency: Currency
   price: string
   buyerNanoAddress: string
-  buyerCountry: string
-  buyerDialCode: string
-  buyerContact: string
+  paymentMethods: string
   clientSessionId: string
 }
 
@@ -129,20 +128,27 @@ export type PublishedOffer = {
 
 export type TakeOfferPayload = {
   buyerNanoAddress?: string
-  buyerCountry: string
-  buyerDialCode: string
-  buyerContact: string
   clientSessionId: string
 }
 
 export type TakenOffer = {
   offer: PublicOffer
-  sellerContact: string
+  paymentMethods?: string
+  sellerContact?: string
   sellerCountry?: string
   sellerDialCode?: string
   buyerContact?: string
   buyerCountry?: string
   buyerDialCode?: string
+}
+
+export type ChatMessage = {
+  id: string
+  offerId: string
+  senderRole: 'seller' | 'buyer'
+  senderLabel: string
+  body: string
+  createdAt: string
 }
 
 export type CustodianAuthIntent = {
@@ -330,4 +336,15 @@ export const verifyCustodianRelease = (offerId: string, custodianSessionId: stri
   requestJson<{ offer: PublicOffer; paymentHash?: string }>(`/offers/${encodeURIComponent(offerId)}/verify-custodian-release`, {
     method: 'POST',
     body: JSON.stringify({ custodianSessionId }),
+  })
+
+export const getOfferChat = (offerId: string, clientSessionId: string) =>
+  requestJson<{ messages: ChatMessage[] }>(
+    `/offers/${encodeURIComponent(offerId)}/chat?clientSessionId=${encodeURIComponent(clientSessionId)}`,
+  )
+
+export const sendOfferChatMessage = (offerId: string, payload: { clientSessionId: string; body: string }) =>
+  requestJson<{ message: ChatMessage; messages: ChatMessage[] }>(`/offers/${encodeURIComponent(offerId)}/chat`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
   })
