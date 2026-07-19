@@ -204,6 +204,7 @@ type Custodian = {
   country?: string
   dialCode?: string
   isLeader?: boolean
+  role?: 'ADMIN' | 'CONCILIATOR'
 }
 
 const defaultCustodians: Custodian[] = [
@@ -217,6 +218,7 @@ const defaultCustodians: Custodian[] = [
     dialCode: '+57',
     contact: process.env.NANOPAQUETE_CUSTODIAN_CONTACT ?? '+573008188284',
     isLeader: true,
+    role: 'ADMIN',
   },
 ]
 
@@ -255,6 +257,7 @@ const sanitizeCustodians = (value: unknown) => {
   const normalized = valid.map((custodian) => ({
     ...custodian,
     isLeader: custodian.id === leaderCustodianId ? true : Boolean(custodian.isLeader),
+    role: custodian.role === 'ADMIN' || custodian.id === leaderCustodianId || custodian.isLeader ? 'ADMIN' as const : 'CONCILIATOR' as const,
   }))
   const hasDefaultLeader = normalized.some((custodian) => custodian.id === leaderCustodianId)
   const withDefaultLeader = hasDefaultLeader
@@ -272,6 +275,9 @@ const getCustodianById = (store: Store, custodianId: string | undefined) =>
 const getCustodianByWallet = (store: Store, wallet: string) =>
   getStoreCustodians(store).find((custodian) => custodian.wallet === wallet)
 const getLeaderCustodians = (store: Store) => getStoreCustodians(store).filter((custodian) => custodian.isLeader)
+const isAdminCustodian = (custodian: Custodian | undefined) => custodian?.role === 'ADMIN' || Boolean(custodian?.isLeader)
+const isAdminSession = (store: Store, session: CustodianSession | undefined) =>
+  isAdminCustodian(session ? getCustodianById(store, session.custodianId) : undefined)
 const pickRandomLeaderCustodian = (store: Store) => {
   const leaders = getLeaderCustodians(store)
   return leaders[Math.floor(Math.random() * leaders.length)] ?? getActiveCustodian(store)
@@ -1195,6 +1201,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
         dialCode: custodian.dialCode,
         wallet: custodian.wallet,
         isLeader: custodian.isLeader,
+        role: custodian.role,
       })),
     })
     return
@@ -1211,8 +1218,9 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       return
     }
 
+    const canManage = isAdminSession(store, custodianSession)
     await writeStore(store)
-    sendJson(response, 200, { custodians: getStoreCustodians(store), canManage: true })
+    sendJson(response, 200, { custodians: canManage ? getStoreCustodians(store) : [], canManage })
     return
   }
 
@@ -1220,12 +1228,19 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     const body = await readJsonBody(request)
     const custodianSessionId = normalizeClientSessionId(body.custodianSessionId)
     const wallet = normalizeText(body.wallet)
+    const role = normalizeText(body.role).toUpperCase() === 'ADMIN' ? 'ADMIN' : 'CONCILIATOR'
     const store = await readStore()
     const custodianSession = getValidCustodianSession(store, custodianSessionId)
 
     if (!custodianSession) {
       await writeStore(store)
       sendJson(response, 403, { error: 'Autenticacion autorizada requerida.' })
+      return
+    }
+
+    if (!isAdminSession(store, custodianSession)) {
+      await writeStore(store)
+      sendJson(response, 403, { error: 'Solo un administrador puede autorizar direcciones.' })
       return
     }
 
@@ -1248,6 +1263,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       wallet,
       contact: wallet,
       isLeader: false,
+      role,
     }
     store.custodians = [...existingCustodians, custodian]
     await writeStore(store)
@@ -1268,6 +1284,12 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     if (!custodianSession) {
       await writeStore(store)
       sendJson(response, 403, { error: 'Autenticacion autorizada requerida.' })
+      return
+    }
+
+    if (!isAdminSession(store, custodianSession)) {
+      await writeStore(store)
+      sendJson(response, 403, { error: 'Solo un administrador puede eliminar direcciones autorizadas.' })
       return
     }
 
@@ -1420,7 +1442,14 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       sendJson(
         response,
         200,
-        { sessionId: session.id, expiresAt: session.expiresAt, custodianId: authenticatedCustodian.id, custodianName: 'Direccion autorizada', isLeader: true },
+        {
+          sessionId: session.id,
+          expiresAt: session.expiresAt,
+          custodianId: authenticatedCustodian.id,
+          custodianName: 'Direccion autorizada',
+          isLeader: authenticatedCustodian.isLeader,
+          role: authenticatedCustodian.role,
+        },
         { 'Set-Cookie': createCustodianSessionCookie(session) },
       )
     } catch (error) {
@@ -2282,11 +2311,21 @@ const handleAdmin = async (request: IncomingMessage, response: ServerResponse, u
   }
 
   if (request.method === 'GET' && url.pathname === '/admin/nano-accounts') {
+    if (!isAdminSession(store, custodianSession)) {
+      sendJson(response, 403, { error: 'Solo un administrador puede entrar a Cuentas Nano.' })
+      return
+    }
+
     sendHtml(response, 200, renderNanoAccountsAdmin(store.nanoAccounts, getActiveCustodian(store).wallet, normalizeText(url.searchParams.get('message'))))
     return
   }
 
   if (request.method === 'POST' && url.pathname === '/admin/nano-accounts/generate') {
+    if (!isAdminSession(store, custodianSession)) {
+      sendJson(response, 403, { error: 'Solo un administrador puede generar cuentas Nano.' })
+      return
+    }
+
     const form = await readFormBody(request)
 
     try {
@@ -2308,6 +2347,11 @@ const handleAdmin = async (request: IncomingMessage, response: ServerResponse, u
   const nanoAccountUpdateMatch = url.pathname.match(/^\/admin\/nano-accounts\/([^/]+)\/update$/)
 
   if (request.method === 'POST' && nanoAccountUpdateMatch) {
+    if (!isAdminSession(store, custodianSession)) {
+      sendJson(response, 403, { error: 'Solo un administrador puede modificar cuentas Nano.' })
+      return
+    }
+
     const accountId = decodeURIComponent(nanoAccountUpdateMatch[1])
     const form = await readFormBody(request)
     const status = String(form.get('status') ?? '')
@@ -2350,6 +2394,11 @@ const handleAdmin = async (request: IncomingMessage, response: ServerResponse, u
   const nanoAccountWithdrawalMatch = url.pathname.match(/^\/admin\/nano-accounts\/([^/]+)\/withdraw$/)
 
   if (request.method === 'POST' && nanoAccountWithdrawalMatch) {
+    if (!isAdminSession(store, custodianSession)) {
+      sendJson(response, 403, { error: 'Solo un administrador puede retirar fondos de cuentas Nano.' })
+      return
+    }
+
     const accountId = decodeURIComponent(nanoAccountWithdrawalMatch[1])
     const form = await readFormBody(request)
     const account = store.nanoAccounts.find((item) => item.id === accountId)

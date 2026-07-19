@@ -44,11 +44,13 @@ export type CustodianOption = {
   dialCode?: string
   wallet?: string
   isLeader?: boolean
+  role?: 'ADMIN' | 'CONCILIATOR'
 }
 
 export type ManagedCustodian = CustodianOption & {
   wallet: string
   isLeader?: boolean
+  role?: 'ADMIN' | 'CONCILIATOR'
 }
 
 export type PublicOffer = {
@@ -168,6 +170,7 @@ export type CustodianSession = {
   custodianId: string
   custodianName: string
   isLeader?: boolean
+  role?: 'ADMIN' | 'CONCILIATOR'
 }
 
 export type ReleaseFeeIntent = {
@@ -314,7 +317,7 @@ export const getManagedCustodians = (custodianSessionId: string) =>
     `/custodian-admin/custodians?custodianSessionId=${encodeURIComponent(custodianSessionId)}`,
   )
 
-export const addManagedCustodian = (payload: { custodianSessionId: string; wallet: string }) =>
+export const addManagedCustodian = (payload: { custodianSessionId: string; wallet: string; role: 'ADMIN' | 'CONCILIATOR' }) =>
   requestJson<{ custodian: ManagedCustodian; custodians: ManagedCustodian[] }>(
     '/custodian-admin/custodians',
     {

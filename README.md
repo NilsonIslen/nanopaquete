@@ -33,7 +33,7 @@ La plataforma no persigue el precio del mercado. Cada usuario define cuanta cant
 
 ## Disputas
 
-Si aparece una disputa durante una negociacion, las partes deben conservar comprobantes y contactar a un conciliador de Nanopaquete. Los conciliadores son personas que autorizan mostrar sus datos para ayudar a resolver disputas.
+Si aparece una disputa durante una negociacion, las partes deben conservar comprobantes y contactar a un conciliador de Nanopaquete. Los conciliadores son personas de confianza de la plataforma que autorizan mostrar sus datos para ayudar a resolver disputas.
 
 ## Comandos
 
@@ -64,3 +64,5 @@ npm run lint
 `/admin/offers` permite revisar ofertas, negociaciones, chats y estados operativos.
 
 `/admin/nano-accounts` permite generar cuentas Nano reales desde el nodo RPC, guardar la clave privada cifrada, administrar estado/uso/notas y retirar la comision disponible hacia la wallet de custodia predeterminada.
+
+Las direcciones autorizadas pueden tener perfil de conciliador o administrador. Los conciliadores solo entran a ofertas; los administradores entran a ofertas y cuentas Nano, y pueden autorizar nuevas direcciones.

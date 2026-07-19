@@ -106,8 +106,15 @@ const getOfferGroupTitle = (currency: Currency) => {
   return details.isCrypto ? 'Global' : `${currency} ${details.group}`
 }
 
-const getCustodianContactLabel = (custodian: CustodianOption) =>
-  [custodian.dialCode, custodian.contact].filter(Boolean).join(' ') || custodian.wallet || 'Contacto pendiente'
+const getCustodianContactLabel = (custodian: CustodianOption) => {
+  const contact = custodian.contact?.trim()
+  const dialCode = custodian.dialCode?.trim()
+  if (!contact) return custodian.wallet || 'Contacto pendiente'
+  if (!dialCode || contact.startsWith('+') || contact.replace(/\D/g, '').startsWith(dialCode.replace(/\D/g, ''))) {
+    return contact
+  }
+  return `${dialCode} ${contact}`
+}
 
 type AppView = 'offers' | 'create-offer' | 'wallet' | 'donations' | 'custodian-auth' | 'guide'
 
@@ -135,6 +142,7 @@ const initialBuyOfferForm = {
 
 const initialCustodianForm = {
   wallet: '',
+  role: 'CONCILIATOR' as 'ADMIN' | 'CONCILIATOR',
 }
 
 const takenOfferStorageKey = 'nanopaquete:taken-offer'
@@ -481,6 +489,7 @@ export function Nanopaquete() {
       const response = await addManagedCustodian({
         custodianSessionId: custodianSession.sessionId,
         wallet: custodianForm.wallet,
+        role: custodianForm.role,
       })
       setManagedCustodians(response.custodians)
       setCustodianForm(initialCustodianForm)
@@ -842,15 +851,18 @@ export function Nanopaquete() {
               <>
                 <div className="private-box custodian-admin-box">
                   <div className="panel-heading">
-                    <h3>Conciliador</h3>
+                    <h3>{custodianSession.role === 'ADMIN' ? 'Administrador' : 'Conciliador'}</h3>
+                    <p>{custodianSession.role === 'ADMIN' ? 'Acceso a ofertas y cuentas Nano.' : 'Acceso limitado a ofertas y conciliacion de disputas.'}</p>
                   </div>
                   <div className="button-row">
                     <a className="wallet-download-link standalone-link" href="/admin/offers">
                       Ofertas
                     </a>
-                    <a className="wallet-download-link standalone-link" href="/admin/nano-accounts">
-                      Cuentas Nano
-                    </a>
+                    {custodianSession.role === 'ADMIN' && (
+                      <a className="wallet-download-link standalone-link" href="/admin/nano-accounts">
+                        Cuentas Nano
+                      </a>
+                    )}
                   </div>
                 </div>
                 {!!managedCustodians.length && (
@@ -865,7 +877,7 @@ export function Nanopaquete() {
                             <strong>Direccion Nano</strong>
                             <small>{custodian.wallet}</small>
                           </div>
-                          <span className="offer-status-pill">Autorizada</span>
+                          <span className="offer-status-pill">{custodian.role === 'ADMIN' ? 'Administrador' : 'Conciliador'}</span>
                           {canManageCustodians && (
                             <div className="custodian-row-actions">
                               <button
@@ -893,6 +905,13 @@ export function Nanopaquete() {
                       <label>
                         Direccion Nano
                         <input value={custodianForm.wallet} onChange={(event) => updateCustodianForm('wallet', event.target.value)} required />
+                      </label>
+                      <label>
+                        Perfil
+                        <select value={custodianForm.role} onChange={(event) => updateCustodianForm('role', event.target.value)}>
+                          <option value="CONCILIATOR">Conciliador: solo ofertas</option>
+                          <option value="ADMIN">Administrador: ofertas y cuentas</option>
+                        </select>
                       </label>
                       <button className="primary-button" type="submit" disabled={loading === 'custodian-add'}>
                         Autorizar direccion
@@ -1026,7 +1045,7 @@ export function Nanopaquete() {
             <h3>Cola de negociaciones</h3>
             <p>Si una persona tiene varios anuncios y ya está cerrando una negociación, las siguientes tomas quedan en cola. La plataforma muestra el motivo a quienes esperan y activa la siguiente negociación cuando la contraparte libera la anterior.</p>
             <h3>Posibles disputas</h3>
-            <p>Si aparece una disputa durante una negociación, conserva los comprobantes y contacta a un conciliador de Nanopaquete. Los conciliadores son personas que autorizan mostrar sus datos en esta guía para ayudar a resolver disputas.</p>
+            <p>Si aparece una disputa durante una negociación, conserva los comprobantes y contacta a un conciliador de Nanopaquete. Los conciliadores son personas de confianza de la plataforma que autorizan mostrar sus datos en esta guía para ayudar a resolver disputas.</p>
             <div className="conciliator-list">
               {disputeConciliators.map((conciliator) => (
                 <article className="conciliator-item" key={conciliator.id}>
