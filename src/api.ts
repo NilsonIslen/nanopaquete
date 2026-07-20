@@ -1,4 +1,4 @@
-const defaultApiUrl = `${window.location.protocol}//${window.location.hostname}:8789/api`
+const defaultApiUrl = '/api'
 
 export const nanopaqueteApiUrl =
   import.meta.env.VITE_NANOPAQUETE_API_URL?.trim() || defaultApiUrl
