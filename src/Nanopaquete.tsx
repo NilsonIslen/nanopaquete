@@ -7,6 +7,7 @@ import {
   confirmSellerPayment,
   deleteOffer,
   deleteManagedCustodian,
+  ensureClientSession,
   getManagedCustodians,
   getOfferChat,
   getPushConfig,
@@ -150,6 +151,7 @@ const initialCustodianForm = {
 const takenOfferStorageKey = 'nanopaquete:taken-offer'
 const custodianSessionStorageKey = 'nanopaquete:custodian-session'
 const clientSessionStorageKey = 'nanopaquete:client-session'
+const offerOwnerTokensStorageKey = 'nanopaquete:offer-owner-tokens'
 
 const createClientSessionId = () =>
   crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2)
@@ -180,6 +182,22 @@ const getStoredCustodianSession = () => {
   } catch {
     return null
   }
+}
+
+const getStoredOfferOwnerTokens = () => {
+  try {
+    const value = window.localStorage.getItem(offerOwnerTokensStorageKey)
+    const tokens = value ? (JSON.parse(value) as Record<string, string>) : {}
+    return Object.fromEntries(
+      Object.entries(tokens).filter(([offerId, token]) => offerId && typeof token === 'string' && token),
+    )
+  } catch {
+    return {}
+  }
+}
+
+const saveStoredOfferOwnerTokens = (tokens: Record<string, string>) => {
+  window.localStorage.setItem(offerOwnerTokensStorageKey, JSON.stringify(tokens))
 }
 
 const shortDate = (value: string) =>
@@ -344,6 +362,7 @@ export function Nanopaquete() {
   const [activeView, setActiveView] = useState<AppView>(getInitialView)
   const [isMenuOpen, setIsMenuOpen] = useState(false)
   const [clientSessionId] = useState(getClientSessionId)
+  const [offerOwnerTokens, setOfferOwnerTokens] = useState<Record<string, string>>(getStoredOfferOwnerTokens)
   const autoStartedDepositOffers = useRef(new Set<string>())
   const knownOfferStates = useRef(new Map<string, Pick<PublicOffer, 'status' | 'sellerDepositConfirmed' | 'canUseChat' | 'isPublishedOffer'>>())
   const hasLoadedOfferStates = useRef(false)
@@ -367,7 +386,7 @@ export function Nanopaquete() {
     setLoading('offers')
 
     try {
-      const response = await getOffers(clientSessionId, custodianSession?.sessionId)
+      const response = await getOffers(clientSessionId, custodianSession?.sessionId, offerOwnerTokens)
       setOffers(response.offers)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'No se pudieron cargar las ofertas.')
@@ -381,7 +400,7 @@ export function Nanopaquete() {
 
     try {
       const [offersResponse, negotiationResponse] = await Promise.all([
-        getOffers(clientSessionId, custodianSession?.sessionId),
+        getOffers(clientSessionId, custodianSession?.sessionId, offerOwnerTokens),
         getBuyerNegotiation(clientSessionId),
       ])
       setOffers(offersResponse.offers)
@@ -402,6 +421,31 @@ export function Nanopaquete() {
       response.custodians.some((custodian) => custodian.id === current) ? current : response.custodians[0]?.id || '',
     )
   }
+
+  const rememberOfferOwnerToken = (offerId: string, ownerToken?: string) => {
+    if (!ownerToken) return offerOwnerTokens
+
+    const nextTokens = { ...offerOwnerTokens, [offerId]: ownerToken }
+    saveStoredOfferOwnerTokens(nextTokens)
+    setOfferOwnerTokens(nextTokens)
+    return nextTokens
+  }
+
+  useEffect(() => {
+    let ignore = false
+
+    ensureClientSession(clientSessionId)
+      .then((response) => {
+        if (ignore || !response.clientSessionId || response.clientSessionId === clientSessionId) return
+        window.localStorage.setItem(clientSessionStorageKey, response.clientSessionId)
+        window.location.reload()
+      })
+      .catch(() => undefined)
+
+    return () => {
+      ignore = true
+    }
+  }, [clientSessionId])
 
   useEffect(() => {
     let ignore = false
@@ -426,7 +470,7 @@ export function Nanopaquete() {
   useEffect(() => {
     let ignore = false
 
-    Promise.all([getOffers(clientSessionId, custodianSession?.sessionId), getBuyerNegotiation(clientSessionId)])
+    Promise.all([getOffers(clientSessionId, custodianSession?.sessionId, offerOwnerTokens), getBuyerNegotiation(clientSessionId)])
       .then(([offersResponse, negotiationResponse]) => {
         if (ignore) return
         setOffers(offersResponse.offers)
@@ -441,14 +485,14 @@ export function Nanopaquete() {
     return () => {
       ignore = true
     }
-  }, [clientSessionId, custodianSession?.sessionId])
+  }, [clientSessionId, custodianSession?.sessionId, offerOwnerTokens])
 
   useEffect(() => {
     if (activeView !== 'offers' && !takenOfferId) return undefined
 
     let ignore = false
     const loadLatestState = () => {
-      Promise.all([getOffers(clientSessionId, custodianSession?.sessionId), getBuyerNegotiation(clientSessionId)])
+      Promise.all([getOffers(clientSessionId, custodianSession?.sessionId, offerOwnerTokens), getBuyerNegotiation(clientSessionId)])
         .then(([offersResponse, negotiationResponse]) => {
           if (ignore) return
           setOffers(offersResponse.offers)
@@ -464,7 +508,7 @@ export function Nanopaquete() {
       ignore = true
       window.clearInterval(interval)
     }
-  }, [activeView, clientSessionId, custodianSession?.sessionId, takenOfferId])
+  }, [activeView, clientSessionId, custodianSession?.sessionId, offerOwnerTokens, takenOfferId])
 
   useEffect(() => {
     if (!takenOfferId || !takenOffer?.offer.canUseChat) {
@@ -685,7 +729,7 @@ export function Nanopaquete() {
     setLoading('publish-sell')
 
     try {
-      await publishOffer({
+      const response = await publishOffer({
         amountXno: sellerForm.amountXno,
         currency: sellerForm.currency,
         price: sellerForm.price,
@@ -693,9 +737,11 @@ export function Nanopaquete() {
         custodianId: selectedCustodianId,
         clientSessionId,
       })
+      const nextOwnerTokens = rememberOfferOwnerToken(response.offer.id, response.ownerToken)
       setSellerForm(initialSellerForm)
       setActiveView('offers')
-      await loadOffers()
+      const offersResponse = await getOffers(clientSessionId, custodianSession?.sessionId, nextOwnerTokens)
+      setOffers(offersResponse.offers)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'No se pudo publicar la oferta de venta.')
     } finally {
@@ -709,7 +755,7 @@ export function Nanopaquete() {
     setLoading('publish-buy')
 
     try {
-      await publishBuyOffer({
+      const response = await publishBuyOffer({
         amountXno: buyOfferForm.amountXno,
         currency: buyOfferForm.currency,
         price: buyOfferForm.price,
@@ -717,9 +763,11 @@ export function Nanopaquete() {
         paymentMethods: buyOfferForm.paymentMethods,
         clientSessionId,
       })
+      const nextOwnerTokens = rememberOfferOwnerToken(response.offer.id, response.ownerToken)
       setBuyOfferForm(initialBuyOfferForm)
       setActiveView('offers')
-      await loadOffers()
+      const offersResponse = await getOffers(clientSessionId, custodianSession?.sessionId, nextOwnerTokens)
+      setOffers(offersResponse.offers)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'No se pudo publicar la oferta de compra.')
     } finally {
@@ -788,6 +836,12 @@ export function Nanopaquete() {
     try {
       await deleteOffer(offerId, clientSessionId)
       setOffers((currentOffers) => currentOffers.filter((offer) => offer.id !== offerId))
+      setOfferOwnerTokens((currentTokens) => {
+        const nextTokens = { ...currentTokens }
+        delete nextTokens[offerId]
+        saveStoredOfferOwnerTokens(nextTokens)
+        return nextTokens
+      })
       if (selectedOffer?.id === offerId) setSelectedOffer(null)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'No se pudo eliminar la oferta.')
@@ -948,7 +1002,7 @@ export function Nanopaquete() {
 
     try {
       if (sessionId) await logoutCustodianAuth(sessionId)
-      const response = await getOffers(clientSessionId)
+      const response = await getOffers(clientSessionId, undefined, offerOwnerTokens)
       setOffers(response.offers)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : 'No se pudieron cargar las ofertas.')

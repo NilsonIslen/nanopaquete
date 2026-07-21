@@ -126,6 +126,7 @@ export type PublishedOffer = {
   offer: PublicOffer
   sellerPrivateCode: string
   custodyFeeXno: string
+  ownerToken?: string
 }
 
 export type TakeOfferPayload = {
@@ -196,6 +197,7 @@ async function requestJson<T>(path: string, options?: RequestInit): Promise<T> {
   try {
     response = await fetch(`${nanopaqueteApiUrl}${path}`, {
       ...options,
+      credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
         ...(options?.headers ?? {}),
@@ -224,10 +226,20 @@ export const savePushSubscription = (payload: { clientSessionId: string; subscri
     body: JSON.stringify(payload),
   })
 
-export const getOffers = (clientSessionId: string, custodianSessionId?: string) => {
+export const ensureClientSession = (clientSessionId: string) =>
+  requestJson<{ clientSessionId: string }>('/client-session', {
+    method: 'POST',
+    body: JSON.stringify({ clientSessionId }),
+  })
+
+export const getOffers = (clientSessionId: string, custodianSessionId?: string, ownerTokens?: Record<string, string>) => {
   const params = new URLSearchParams({ clientSessionId })
   if (custodianSessionId) params.set('custodianSessionId', custodianSessionId)
-  return requestJson<{ offers: PublicOffer[] }>(`/offers?${params.toString()}`)
+  return requestJson<{ offers: PublicOffer[] }>(`/offers?${params.toString()}`, {
+    headers: ownerTokens && Object.keys(ownerTokens).length
+      ? { 'X-Nanopaquete-Owner-Tokens': JSON.stringify(ownerTokens) }
+      : undefined,
+  })
 }
 
 export const getBuyerNegotiation = (clientSessionId: string) =>

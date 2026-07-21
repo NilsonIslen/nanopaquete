@@ -75,6 +75,7 @@ type EscrowRecord = {
 type OfferRecord = {
   id: string
   offerType?: OfferType
+  ownerTokenHash?: string
   escrowId?: string
   escrowNanoAccountId?: string
   escrowNanoAddress?: string
@@ -338,7 +339,8 @@ if (vapidPublicKey && vapidPrivateKey) {
 const corsHeaders = {
   'Access-Control-Allow-Origin': process.env.NANOPAQUETE_ALLOWED_ORIGIN ?? '*',
   'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Nanopaquete-Owner-Tokens',
+  'Access-Control-Allow-Credentials': 'true',
 }
 
 const sendJson = (response: ServerResponse, status: number, data: unknown, headers: Record<string, string> = {}) => {
@@ -360,6 +362,7 @@ const escapeHtml = (value: string | number | undefined) =>
     .replaceAll("'", '&#039;')
 
 const custodianSessionCookieName = 'nanopaquete_custodian_session'
+const clientSessionCookieName = 'nanopaquete_client_session'
 
 const getRequestCookie = (request: IncomingMessage, name: string) => {
   const cookieHeader = request.headers.cookie ?? ''
@@ -377,6 +380,22 @@ const createCustodianSessionCookie = (session: CustodianSession) => {
 
 const clearCustodianSessionCookie = () =>
   `${custodianSessionCookieName}=; Path=/admin; HttpOnly; SameSite=Lax; Max-Age=0`
+
+const createClientSessionCookie = (clientSessionId: string) =>
+  `${clientSessionCookieName}=${encodeURIComponent(clientSessionId)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${60 * 60 * 24 * 400}`
+
+const getCookieClientSessionId = (request: IncomingMessage) =>
+  normalizeClientSessionId(decodeURIComponent(getRequestCookie(request, clientSessionCookieName) ?? ''))
+
+const getRequestClientSessionId = (request: IncomingMessage, value?: unknown) => {
+  const provided = normalizeClientSessionId(value)
+  if (provided) return provided
+
+  const cookieSessionId = getCookieClientSessionId(request)
+  if (cookieSessionId) return cookieSessionId
+
+  return randomUUID()
+}
 
 const getAdminCustodianSession = (store: Store, request: IncomingMessage) =>
   getValidCustodianSession(store, decodeURIComponent(getRequestCookie(request, custodianSessionCookieName) ?? ''))
@@ -738,6 +757,26 @@ const sendFromTemporaryAccountWithRetry = async (
 const normalizeText = (value: unknown) => String(value ?? '').trim()
 const normalizeClientSessionId = (value: unknown) =>
   normalizeText(value).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 80)
+const createOfferOwnerToken = () => randomUUID().replaceAll('-', '') + randomBytes(16).toString('hex')
+const hashOfferOwnerToken = (value: string) => createHash('sha256').update(value).digest('hex')
+const parseOwnerTokenHeader = (request: IncomingMessage) => {
+  const header = request.headers['x-nanopaquete-owner-tokens']
+  const value = Array.isArray(header) ? header[0] : header
+  if (!value) return {}
+
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>
+    return Object.fromEntries(
+      Object.entries(parsed)
+        .map(([offerId, token]) => [normalizeClientSessionId(offerId), normalizeText(token)])
+        .filter(([offerId, token]) => offerId && token),
+    ) as Record<string, string>
+  } catch {
+    return {}
+  }
+}
+const hasValidOwnerToken = (offer: OfferRecord, ownerTokens: Record<string, string> | undefined) =>
+  Boolean(offer.ownerTokenHash && ownerTokens?.[offer.id] && hashOfferOwnerToken(ownerTokens[offer.id]) === offer.ownerTokenHash)
 const createCustodianId = (name: string) => {
   const base = normalizeText(name)
     .toLowerCase()
@@ -1029,12 +1068,22 @@ const publicChatMessage = (offer: OfferRecord, message: ChatMessage) => ({
   createdAt: message.createdAt,
 })
 
-const publicOffer = (offer: OfferRecord, context: { clientSessionId?: string; custodianSession?: CustodianSession; store?: Store } = {}) => {
+const publicOffer = (offer: OfferRecord, context: { clientSessionId?: string; custodianSession?: CustodianSession; store?: Store; ownerTokens?: Record<string, string> } = {}) => {
   const offerType = offer.offerType ?? 'SELL'
-  const isSellPublisher = Boolean(offerType === 'SELL' && context.clientSessionId && offer.sellerSessionId && offer.sellerSessionId === context.clientSessionId)
-  const isBuyPublisher = Boolean(offerType === 'BUY' && context.clientSessionId && offer.buyerSessionId === context.clientSessionId)
+  const hasOwnerToken = hasValidOwnerToken(offer, context.ownerTokens)
+  const isSellPublisher = Boolean(offerType === 'SELL' && (
+    (context.clientSessionId && offer.sellerSessionId && offer.sellerSessionId === context.clientSessionId) ||
+    hasOwnerToken
+  ))
+  const isBuyPublisher = Boolean(offerType === 'BUY' && (
+    (context.clientSessionId && offer.buyerSessionId === context.clientSessionId) ||
+    hasOwnerToken
+  ))
   const isPublisher = isSellPublisher || isBuyPublisher
-  const isNanoSeller = Boolean(context.clientSessionId && offer.sellerSessionId && offer.sellerSessionId === context.clientSessionId)
+  const isNanoSeller = Boolean(
+    (context.clientSessionId && offer.sellerSessionId && offer.sellerSessionId === context.clientSessionId) ||
+    (offerType === 'SELL' && hasOwnerToken),
+  )
   const isTaker = Boolean(
     context.clientSessionId &&
     (offerType === 'BUY'
@@ -1505,6 +1554,13 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     return
   }
 
+  if (request.method === 'POST' && url.pathname === '/api/client-session') {
+    const body = await readJsonBody(request)
+    const clientSessionId = getCookieClientSessionId(request) || normalizeClientSessionId(body.clientSessionId) || randomUUID()
+    sendJson(response, 200, { clientSessionId }, { 'Set-Cookie': createClientSessionCookie(clientSessionId) })
+    return
+  }
+
   if (request.method === 'GET' && url.pathname === '/api/push-config') {
     sendJson(response, 200, {
       enabled: Boolean(vapidPublicKey && vapidPrivateKey),
@@ -1570,17 +1626,31 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
   }
 
   if (request.method === 'GET' && url.pathname === '/api/offers') {
-    const clientSessionId = normalizeClientSessionId(url.searchParams.get('clientSessionId'))
+    const clientSessionId = getRequestClientSessionId(request, url.searchParams.get('clientSessionId'))
     const custodianSessionId = normalizeClientSessionId(url.searchParams.get('custodianSessionId'))
+    const ownerTokens = parseOwnerTokenHeader(request)
     const store = await readStore()
     const custodianSession = getValidCustodianSession(store, custodianSessionId)
-    if (custodianSessionId) await writeStore(store)
+    let recoveredOwnerSession = false
+    store.offers.forEach((offer) => {
+      if (!hasValidOwnerToken(offer, ownerTokens)) return
+      const offerType = offer.offerType ?? 'SELL'
+      if (offerType === 'BUY' && offer.buyerSessionId !== clientSessionId) {
+        offer.buyerSessionId = clientSessionId
+        recoveredOwnerSession = true
+      }
+      if (offerType === 'SELL' && offer.sellerSessionId !== clientSessionId) {
+        offer.sellerSessionId = clientSessionId
+        recoveredOwnerSession = true
+      }
+    })
+    if (custodianSessionId || recoveredOwnerSession) await writeStore(store)
     sendJson(response, 200, {
       offers: store.offers
         .filter((offer) => ['ACTIVE', 'QUEUED', 'NEGOTIATION', 'RELEASING'].includes(offer.status))
         .filter((offer) => !custodianSession || offer.custodianId === custodianSession.custodianId)
-        .map((offer) => publicOffer(offer, { clientSessionId, custodianSession, store })),
-    })
+        .map((offer) => publicOffer(offer, { clientSessionId, custodianSession, store, ownerTokens })),
+    }, { 'Set-Cookie': createClientSessionCookie(clientSessionId) })
     return
   }
 
@@ -1998,7 +2068,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     const currency = normalizeText(body.currency).toUpperCase()
     const price = normalizeText(body.price)
     const paymentMethods = normalizeText(body.paymentMethods)
-    const clientSessionId = normalizeClientSessionId(body.clientSessionId)
+    const clientSessionId = getRequestClientSessionId(request, body.clientSessionId)
 
     try {
       if (BigInt(nanoToRaw(amountXno)) <= 0n) throw new Error('Monto invalido')
@@ -2024,10 +2094,12 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
 
     const store = await readStore()
     const custodian = getCustodianById(store, normalizeText(body.custodianId))
+    const ownerToken = createOfferOwnerToken()
 
     const offer: OfferRecord = {
       id: `of_${randomUUID().replaceAll('-', '').slice(0, 18)}`,
       offerType: 'SELL',
+      ownerTokenHash: hashOfferOwnerToken(ownerToken),
       amountXno,
       currency,
       price,
@@ -2047,7 +2119,12 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     )
     await writeStore(store)
 
-    sendJson(response, 201, { offer: publicOffer(offer, { clientSessionId, store }), sellerPrivateCode: offer.sellerPrivateCode, custodyFeeXno: getCustodyFeeXno(offer.amountXno) })
+    sendJson(
+      response,
+      201,
+      { offer: publicOffer(offer, { clientSessionId, store }), sellerPrivateCode: offer.sellerPrivateCode, custodyFeeXno: getCustodyFeeXno(offer.amountXno), ownerToken },
+      { 'Set-Cookie': createClientSessionCookie(clientSessionId) },
+    )
     return
   }
 
@@ -2058,7 +2135,7 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     const price = normalizeText(body.price)
     const buyerNanoAddress = normalizeText(body.buyerNanoAddress)
     const paymentMethods = normalizeText(body.paymentMethods)
-    const clientSessionId = normalizeClientSessionId(body.clientSessionId)
+    const clientSessionId = getRequestClientSessionId(request, body.clientSessionId)
 
     try {
       if (BigInt(nanoToRaw(amountXno)) <= 0n) throw new Error('Monto invalido')
@@ -2089,9 +2166,11 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
 
     const store = await readStore()
     const custodian = getActiveCustodian(store)
+    const ownerToken = createOfferOwnerToken()
     const offer: OfferRecord = {
       id: `of_${randomUUID().replaceAll('-', '').slice(0, 18)}`,
       offerType: 'BUY',
+      ownerTokenHash: hashOfferOwnerToken(ownerToken),
       amountXno,
       currency,
       price,
@@ -2110,7 +2189,12 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
       { offerId: offer.id, clientSessionId },
     )
     await writeStore(store)
-    sendJson(response, 201, { offer: publicOffer(offer, { clientSessionId, store }), sellerPrivateCode: '', custodyFeeXno: getCustodyFeeXno(offer.amountXno) })
+    sendJson(
+      response,
+      201,
+      { offer: publicOffer(offer, { clientSessionId, store }), sellerPrivateCode: '', custodyFeeXno: getCustodyFeeXno(offer.amountXno), ownerToken },
+      { 'Set-Cookie': createClientSessionCookie(clientSessionId) },
+    )
     return
   }
 
