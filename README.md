@@ -51,8 +51,10 @@ npm run lint
 - `NANOPAQUETE_API_PORT`: puerto API, por defecto `8789`.
 - `NANOPAQUETE_ESCROW_WALLET`: wallet Nano de custodia. Por defecto usa `nano_1j7csyciamkzktswyxey5yt6f1rg1zbw3rtioe7xdze4fekkbo7zxri3ijxd`.
 - `NANOPAQUETE_CUSTODIAN_CONTACT`: contacto publico del conciliador base para disputas.
-- `NANOPAQUETE_ACCOUNT_SECRET`: secreto usado para cifrar las claves privadas de las cuentas Nano generadas por el backend. En produccion debe ser una cadena larga y privada.
-- `NANOPAQUETE_ADMIN_PASSWORD`: clave usada solo como respaldo para derivar el cifrado si no se configura `NANOPAQUETE_ACCOUNT_SECRET`.
+- `NANOPAQUETE_ACCOUNT_SECRET`: secreto obligatorio para cifrar y descifrar las claves privadas de las cuentas Nano generadas por el backend. En produccion debe ser una cadena larga, aleatoria y privada.
+- `NANOPAQUETE_ALLOWED_ORIGIN`: origen permitido para CORS. En produccion debe ser el dominio publico de la app.
+- `NANOPAQUETE_BETA_MAX_OFFER_XNO`: monto maximo por oferta durante la prueba. Por defecto `25`.
+- `NANOPAQUETE_BETA_MAX_ACTIVE_OFFERS`: numero maximo de ofertas abiertas por equipo durante la prueba. Por defecto `3`.
 - `NANOPAQUETE_DB_PATH`: ruta de la base SQLite. Por defecto `backend/data/nanopaquete.sqlite`.
 - `NANOPAQUETE_BACKUP_DIR`: carpeta donde se guardan snapshots JSON automaticos del estado. Por defecto `backend/data/backups`.
 - `NANOPAQUETE_BACKUP_INTERVAL_MS`: intervalo minimo entre backups automaticos. Por defecto 15 minutos.
@@ -62,6 +64,11 @@ npm run lint
 - `NANO_RPC_URL`: nodo Nano RPC, por defecto `http://127.0.0.1:7076`.
 - `NANO_RPC_FALLBACK_URLS`: nodos RPC alternos separados por coma.
 - `NANO_WALLET_ID`: wallet local del nodo Nano usada para importar temporalmente las claves cifradas y retirar fondos desde las cuentas generadas. El nodo debe permitir comandos de control.
+
+Las variables visibles del frontend para mostrar los limites de beta son:
+
+- `VITE_NANOPAQUETE_BETA_MAX_OFFER_XNO`: debe coincidir con `NANOPAQUETE_BETA_MAX_OFFER_XNO`.
+- `VITE_NANOPAQUETE_BETA_MAX_ACTIVE_OFFERS`: debe coincidir con `NANOPAQUETE_BETA_MAX_ACTIVE_OFFERS`.
 
 Para generar las claves VAPID:
 

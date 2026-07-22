@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeft, CheckCircle2, Copy, Download, Menu, Send, ShieldCheck, Wallet, X } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, Copy, Download, GitBranch, Menu, Send, ShieldCheck, Wallet, X } from 'lucide-react'
 import { QRCodeSVG } from 'qrcode.react'
 import {
   addManagedCustodian,
@@ -123,6 +123,13 @@ type AppView = 'offers' | 'create-offer' | 'wallet' | 'donations' | 'custodian-a
 
 const nautilusDownloadUrl = 'https://nautilus.io/'
 const natriumDownloadUrl = 'https://natrium.io/'
+const sourceCodeUrl = 'https://github.com/NilsonIslen/nanopaquete'
+const betaMaxOfferXno = import.meta.env.VITE_NANOPAQUETE_BETA_MAX_OFFER_XNO?.trim() || '25'
+const betaMaxActiveOffers = import.meta.env.VITE_NANOPAQUETE_BETA_MAX_ACTIVE_OFFERS?.trim() || '3'
+const betaPublishConfirmation =
+  'Esta es una version de prueba con montos limitados. Confirma que revisaste la cantidad, el metodo de pago y que conservaras comprobantes de la negociacion.'
+const betaTakeConfirmation =
+  'Confirma que revisaste la oferta, que no enviaras pagos externos hasta ver los XNO confirmados en custodia y que conservaras comprobantes.'
 
 const initialSellerForm = {
   amountXno: '',
@@ -725,6 +732,7 @@ export function Nanopaquete() {
 
   const handlePublishSellOffer = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (!window.confirm(betaPublishConfirmation)) return
     setError(null)
     setLoading('publish-sell')
 
@@ -751,6 +759,7 @@ export function Nanopaquete() {
 
   const handlePublishBuyOffer = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (!window.confirm(betaPublishConfirmation)) return
     setError(null)
     setLoading('publish-buy')
 
@@ -782,6 +791,7 @@ export function Nanopaquete() {
       setError('Ya tienes una negociacion abierta. Cancela o cierra esa negociacion antes de tomar otra oferta.')
       return
     }
+    if (!window.confirm(betaTakeConfirmation)) return
     setError(null)
     setLoading('take')
 
@@ -1052,6 +1062,10 @@ export function Nanopaquete() {
               <button type="button" onClick={() => { setActiveView('create-offer'); setIsMenuOpen(false) }}>Crear oferta</button>
               <button type="button" onClick={() => { setActiveView('wallet'); setIsMenuOpen(false) }}>Descargar wallet</button>
               <button type="button" onClick={() => { setActiveView('guide'); setIsMenuOpen(false) }}>Guia</button>
+              <a href={sourceCodeUrl} target="_blank" rel="noreferrer" onClick={() => setIsMenuOpen(false)}>
+                <GitBranch size={17} />
+                Codigo fuente
+              </a>
             </div>
           )}
         </div>
@@ -1250,8 +1264,13 @@ export function Nanopaquete() {
         <section className="single-page-panel">
           <div className="panel guide-panel">
             <h2>Guía</h2>
+            <div className="guide-disputes beta-notice">
+              <p><strong>Versión de prueba:</strong> usa montos pequeños mientras el sistema gana historial operativo. El límite inicial es {betaMaxOfferXno} XNO por oferta y {betaMaxActiveOffers} ofertas abiertas por equipo.</p>
+              <p><strong>Transparencia:</strong> el código fuente está disponible en <a href={sourceCodeUrl} target="_blank" rel="noreferrer">GitHub</a> para revisión pública.</p>
+            </div>
             <h3>Condiciones generales</h3>
             <p>Nanopaquete organiza negociaciones P2P de XNO con custodia automática. Todas las ofertas aparecen en una misma página y se diferencian por tipo: compra de Nano y venta de Nano.</p>
+            <p>Nanopaquete custodia y libera XNO según el estado de la negociación. Los pagos externos entre usuarios no son reversados ni garantizados por la red Nano; cada parte debe verificar la contraparte, conservar comprobantes y usar el chat interno cuando esté habilitado.</p>
             <p>La plataforma no persigue el precio del mercado. Cada usuario define cuántos XNO compra o vende, qué activo entrega o recibe a cambio y cuál es la cantidad de ese activo. Esa libertad crea un mercado interno donde la competencia entre ofertas regula la inflación o depreciación dentro de Nanopaquete.</p>
             <p>Cuando una oferta entra en negociación, Nanopaquete crea una cuenta Nano temporal para custodiar los fondos de esa operación. Esa cuenta se guarda de forma segura en el servidor y no se muestra a los usuarios.</p>
             <h3>Publicar venta de Nano</h3>
@@ -1268,6 +1287,8 @@ export function Nanopaquete() {
             <p>Cuando el comprador paga, el vendedor confirma la recepción del pago y Nanopaquete libera los XNO a la cuenta Nano registrada por el comprador.</p>
             <h3>Cola de negociaciones</h3>
             <p>Si una persona tiene varios anuncios y ya está cerrando una negociación, las siguientes tomas quedan en cola. La plataforma muestra el motivo a quienes esperan y activa la siguiente negociación cuando la contraparte libera la anterior.</p>
+            <h3>Antes de operar</h3>
+            <p>Publica solo ofertas que puedas atender. Revisa la cuenta Nano receptora antes de confirmar, no envíes pagos externos antes de ver los XNO confirmados en custodia y conserva comprobantes de pago, capturas y hashes de transacción.</p>
             <h3>Posibles disputas</h3>
             <p>Si aparece una disputa durante una negociación, conserva los comprobantes y contacta a un conciliador de Nanopaquete. Los conciliadores son personas de confianza de la plataforma que autorizan mostrar sus datos en esta guía para ayudar a resolver disputas.</p>
             <div className="conciliator-list">
@@ -1296,6 +1317,11 @@ export function Nanopaquete() {
         <div className="panel seller-panel">
           <div className="panel-heading">
             <h2>Crear oferta</h2>
+          </div>
+
+          <div className="beta-notice">
+            <p><strong>Prueba cerrada:</strong> máximo {betaMaxOfferXno} XNO por oferta y {betaMaxActiveOffers} ofertas abiertas por equipo.</p>
+            <p>Conserva comprobantes y usa el chat interno cuando la custodia confirme el depósito.</p>
           </div>
 
           <div className="offer-type-tabs" role="tablist" aria-label="Tipo de oferta">
@@ -1643,6 +1669,9 @@ export function Nanopaquete() {
                       )}
                       <p className="form-note">
                         Cuando el vendedor deposite los XNO, se habilitara el chat interno para coordinar el pago por los metodos publicados.
+                      </p>
+                      <p className="form-note beta-risk-note">
+                        No envies pagos externos hasta que Nanopaquete muestre el deposito Nano confirmado en custodia.
                       </p>
                       <div className="button-row">
                         <button className="primary-button" type="submit" disabled={loading === 'take'}>

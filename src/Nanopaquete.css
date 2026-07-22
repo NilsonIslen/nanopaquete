@@ -390,6 +390,25 @@ dd {
   line-height: 1.5;
 }
 
+.beta-notice,
+.beta-risk-note {
+  border: 1px solid #d9a21b;
+  border-radius: 8px;
+  background: #fff7df;
+  color: #3f320e;
+  padding: 12px 14px;
+}
+
+.beta-notice {
+  display: grid;
+  gap: 8px;
+}
+
+.beta-notice p,
+.beta-risk-note {
+  line-height: 1.5;
+}
+
 .buyer-result {
   border-color: #d9c37b;
   background: #fff9e6;
@@ -798,6 +817,7 @@ dd {
 @media (max-width: 640px) {
   .topbar-actions {
     justify-content: stretch;
+    flex-wrap: wrap;
   }
 
   .wallet-download-link {
@@ -824,16 +844,24 @@ dd {
   box-shadow: 0 16px 38px rgba(24, 50, 71, 0.16);
 }
 
-.app-menu button {
+.app-menu button,
+.app-menu a {
   justify-content: flex-start;
   min-height: 38px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  border-radius: 8px;
   background: transparent;
   color: #183247;
   border: 0;
   font-weight: 750;
+  text-decoration: none;
 }
 
-.app-menu button:hover {
+.app-menu button:hover,
+.app-menu a:hover {
   background: #edf4fa;
 }
 
@@ -861,6 +889,11 @@ dd {
 
 .guide-panel h3 {
   margin-top: 8px;
+}
+
+.guide-panel a {
+  color: #1f5f8f;
+  font-weight: 800;
 }
 
 .guide-disputes {

@@ -218,7 +218,6 @@ type Store = {
 }
 
 const port = Number(process.env.NANOPAQUETE_API_PORT ?? 8789)
-const adminPassword = process.env.NANOPAQUETE_ADMIN_PASSWORD ?? 'nanopaquete'
 type Custodian = {
   id: string
   name: string
@@ -311,6 +310,12 @@ const custodyFeeBps = BigInt(
     ? Math.trunc(configuredCustodyFeeBps)
     : 20,
 )
+const betaMaxOfferXno = process.env.NANOPAQUETE_BETA_MAX_OFFER_XNO?.trim() || '25'
+const configuredBetaMaxActiveOffers = Number(process.env.NANOPAQUETE_BETA_MAX_ACTIVE_OFFERS ?? '3')
+const betaMaxActiveOffers =
+  Number.isFinite(configuredBetaMaxActiveOffers) && configuredBetaMaxActiveOffers > 0
+    ? Math.trunc(configuredBetaMaxActiveOffers)
+    : 3
 const custodianAuthAmountXno = process.env.NANOPAQUETE_CUSTODIAN_AUTH_XNO ?? '0.01'
 const sellerPaymentTtlMs = Number(process.env.NANOPAQUETE_SELLER_PAYMENT_TTL_MS ?? 60 * 60 * 1000)
 const releaseFeeTtlMs = Number(process.env.NANOPAQUETE_RELEASE_FEE_TTL_MS ?? 60 * 60 * 1000)
@@ -318,7 +323,7 @@ const custodianAuthTtlMs = Number(process.env.NANOPAQUETE_CUSTODIAN_AUTH_TTL_MS 
 const custodianSessionTtlMs = Number(process.env.NANOPAQUETE_CUSTODIAN_SESSION_TTL_MS ?? 12 * 60 * 60 * 1000)
 const takenOfferCustodianReleaseMs = Number(process.env.NANOPAQUETE_TAKEN_OFFER_RELEASE_MS ?? 24 * 60 * 60 * 1000)
 const releaseRetryIntervalMs = Number(process.env.NANOPAQUETE_RELEASE_RETRY_MS ?? 60 * 1000)
-const nanoAccountSecret = process.env.NANOPAQUETE_ACCOUNT_SECRET ?? adminPassword
+const nanoAccountSecret = process.env.NANOPAQUETE_ACCOUNT_SECRET?.trim() ?? ''
 const nanoWalletId = process.env.NANO_WALLET_ID ?? ''
 const vapidPublicKey = process.env.NANOPAQUETE_VAPID_PUBLIC_KEY ?? ''
 const vapidPrivateKey = process.env.NANOPAQUETE_VAPID_PRIVATE_KEY ?? ''
@@ -337,7 +342,7 @@ if (vapidPublicKey && vapidPrivateKey) {
 }
 
 const corsHeaders = {
-  'Access-Control-Allow-Origin': process.env.NANOPAQUETE_ALLOWED_ORIGIN ?? '*',
+  'Access-Control-Allow-Origin': process.env.NANOPAQUETE_ALLOWED_ORIGIN ?? 'http://localhost:5175',
   'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
   'Access-Control-Allow-Headers': 'Content-Type, Authorization, X-Nanopaquete-Owner-Tokens',
   'Access-Control-Allow-Credentials': 'true',
@@ -425,7 +430,15 @@ const getClientIp = (request: IncomingMessage) => {
   return forwardedIp?.split(',')[0]?.trim() || request.socket.remoteAddress || 'unknown'
 }
 
-const getEncryptionKey = () => createHash('sha256').update(nanoAccountSecret).digest()
+const requireNanoAccountSecret = () => {
+  if (!nanoAccountSecret) {
+    throw new Error('Configura NANOPAQUETE_ACCOUNT_SECRET antes de generar o usar cuentas Nano cifradas.')
+  }
+
+  return nanoAccountSecret
+}
+
+const getEncryptionKey = () => createHash('sha256').update(requireNanoAccountSecret()).digest()
 
 const encryptSecret = (value: string) => {
   const iv = randomBytes(12)
@@ -984,9 +997,34 @@ const releaseTakenOffer = (offer: OfferRecord) => {
 
 const activeNegotiationStatuses: OfferStatus[] = ['NEGOTIATION', 'RELEASING']
 const heldNegotiationStatuses: OfferStatus[] = ['QUEUED', 'NEGOTIATION', 'RELEASING']
+const openOfferStatuses: OfferStatus[] = ['ACTIVE', 'QUEUED', 'NEGOTIATION', 'RELEASING']
 
 const isOfferParticipant = (offer: OfferRecord, clientSessionId: string) =>
   Boolean(clientSessionId && (offer.sellerSessionId === clientSessionId || offer.buyerSessionId === clientSessionId))
+
+const validateBetaOfferLimits = (store: Store, clientSessionId: string, amountXno: string, offerType: OfferType) => {
+  try {
+    const amountRaw = BigInt(nanoToRaw(amountXno))
+    const maxRaw = BigInt(nanoToRaw(betaMaxOfferXno))
+    if (maxRaw > 0n && amountRaw > maxRaw) {
+      return `La version de prueba limita cada oferta a ${betaMaxOfferXno} XNO como maximo.`
+    }
+  } catch {
+    return 'Ingresa una cantidad de XNO valida.'
+  }
+
+  const activePublishedOffers = store.offers.filter((offer) => {
+    const type = offer.offerType ?? 'SELL'
+    if (type !== offerType || !openOfferStatuses.includes(offer.status)) return false
+    return offerType === 'BUY' ? offer.buyerSessionId === clientSessionId : offer.sellerSessionId === clientSessionId
+  }).length
+
+  if (activePublishedOffers >= betaMaxActiveOffers) {
+    return `La version de prueba permite hasta ${betaMaxActiveOffers} ofertas abiertas por equipo. Cierra una antes de publicar otra.`
+  }
+
+  return undefined
+}
 
 const getOtherActiveNegotiation = (store: Store, clientSessionId: string, exceptOfferId?: string) =>
   clientSessionId
@@ -1371,9 +1409,14 @@ const renderNanoAccountsAdmin = (accounts: NanoAccountRecord[], destinationWalle
     </header>
     <main>
       ${message ? `<section class="message">${escapeHtml(message)}</section>` : ''}
+      ${
+        nanoAccountSecret
+          ? ''
+          : '<section class="message"><strong>Configuracion pendiente:</strong> define <code>NANOPAQUETE_ACCOUNT_SECRET</code> antes de generar o retirar fondos desde cuentas Nano.</section>'
+      }
       <section>
         <h2>Generar cuenta</h2>
-        <p class="muted">La clave privada se cifra antes de guardarse. Define <code>NANOPAQUETE_ACCOUNT_SECRET</code> en produccion para no depender de la clave base.</p>
+        <p class="muted">La clave privada se cifra antes de guardarse. Define <code>NANOPAQUETE_ACCOUNT_SECRET</code> antes de generar cuentas Nano.</p>
         <form method="post" action="/admin/nano-accounts/generate">
           <label>
             Etiqueta
@@ -1528,6 +1571,8 @@ const createNanoAccountRecord = async ({
   purpose: NanoAccountRecord['purpose']
   notes?: string
 }): Promise<NanoAccountRecord> => {
+  requireNanoAccountSecret()
+
   const generated = await createNanoAccount()
   const now = new Date().toISOString()
 
@@ -2093,6 +2138,12 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     }
 
     const store = await readStore()
+    const betaLimitError = validateBetaOfferLimits(store, clientSessionId, amountXno, 'SELL')
+    if (betaLimitError) {
+      sendJson(response, 409, { error: betaLimitError })
+      return
+    }
+
     const custodian = getCustodianById(store, normalizeText(body.custodianId))
     const ownerToken = createOfferOwnerToken()
 
@@ -2165,6 +2216,12 @@ const handleApi = async (request: IncomingMessage, response: ServerResponse, url
     }
 
     const store = await readStore()
+    const betaLimitError = validateBetaOfferLimits(store, clientSessionId, amountXno, 'BUY')
+    if (betaLimitError) {
+      sendJson(response, 409, { error: betaLimitError })
+      return
+    }
+
     const custodian = getActiveCustodian(store)
     const ownerToken = createOfferOwnerToken()
     const offer: OfferRecord = {
