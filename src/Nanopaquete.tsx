@@ -1045,7 +1045,12 @@ export function Nanopaquete() {
       <header className="topbar">
         <div className="brand-lockup">
           <span className="brand-icon" aria-hidden="true">
-            <img src="/icnano.png" alt="" />
+            <svg viewBox="0 0 100 100" role="img">
+              <rect x="16" y="28" width="68" height="56" rx="10" fill="#0077ff" />
+              <path d="M16 36 50 16l34 20-34 20z" fill="#3da0ff" />
+              <path d="M50 56v28" stroke="#0045a8" strokeWidth="6" />
+              <path d="M16 36l34 20 34-20" fill="none" stroke="#0045a8" strokeWidth="5" strokeLinejoin="round" />
+            </svg>
           </span>
           <div>
             <h1>Nanopaquete</h1>
